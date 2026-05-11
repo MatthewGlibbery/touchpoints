@@ -274,6 +274,15 @@ All Session X items completed — see Session X Progress below.
 
 ---
 
+## Session AA Progress — COMPLETE
+
+- [x] AA1 — Arrow keys no longer move action cards: added `disableKeyboardA11y={true}` to `<ReactFlow>` in `BlueprintCanvas.tsx`
+- [x] AA2 — Selection highlight follows navigation: `ActionNode` reads `selectedNodeId === action.id` from store instead of ReactFlow's `selected` prop; inspector arrow buttons now correctly highlight the new card and unhighlight the previous one
+- [x] AA3 — GitHub repo initialised and pushed: root `.gitignore`, `app/.env.example`, initial commit of 79 files; live at `https://github.com/MatthewGlibbery/touchpoints` (public)
+- [x] AA4 — README at project root: explains the tool, features, and local setup for a non-technical audience
+
+---
+
 ## Open Questions
 
 - **"New project" state cleanup** — blueprint stays in store memory until new one is submitted; visually fine but slightly impure.
@@ -284,5 +293,4 @@ All Session X items completed — see Session X Progress below.
 ## Future Backlog
 
 - **Semantic zoom in compare mode** — overview mode only applies to main BlueprintCanvas
-- **SplitCanvas pan sync** — U2 above
 - **AI portrait** — wire up image generation for actor avatars

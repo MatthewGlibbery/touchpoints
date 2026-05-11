@@ -511,6 +511,7 @@ Card div (`className="action-drag-handle"`) with:
 - **Media preview** — first media item, edge-to-edge (negative side/bottom margins break out of 14px padding), max-height 120px; click on image/GIF → `setLightboxUrl` (opens global lightbox); sits flush at bottom of card when no badges, or above badges when badges present
 - **Divider + badge pills**: divider (`1px var(--border-subtle)`) only shown when NO media is present; when media is present, badges appear with top spacing only (no divider line); badges only shown if count > 0: transparent bg, `1px solid var(--border-subtle)`, icon + count; red = pains, green = opps, amber = questions
 - **Connection handles**: 12px circles at N/E/S/W edges; `opacity: 0` at rest; proximity-revealed via JS: a `mousemove` listener on the ReactFlow node wrapper sets `data-handle-near="<side>"` when the cursor is within 18px of an edge midpoint, CSS reveals only that handle at `opacity: 0.75`; on direct handle `:hover` or during active drag (`.connectingfrom` / `.connectingto`): `opacity: 1` + size grows to **16×16px**. `pointer-events: all !important` ensures handles receive events regardless of card stacking. **Do not use `.connectionindicator`** — in ReactFlow v12 that class is set on all connectable handles at idle ("valid connection point"), not only during an active drag.
+- **Selected state**: driven by `selectedNodeId === action.id` read from the Zustand store — NOT from ReactFlow's `selected` node prop. This ensures the highlight follows programmatic navigation (inspector arrow buttons, keyboard nav) correctly and not just pointer-driven ReactFlow selection.
 
 **Overview mode card** (when `overviewMode: true`): explicit `height: OVERVIEW_CARD_HEIGHT (56px)`, `box-sizing: border-box`; shows actor icon box + `labelAbstract || label` (2-line clamp); no description, badges, or media; cursor is `pointer`; click opens NodeInspector; double-click and drag are disabled. The node height in the layout matches the card height exactly, so handles land at card borders.
 
@@ -627,8 +628,15 @@ All interaction handlers in ActionNode, PhaseHeaderNode, and ActorLabelNode are 
 
 ```
 VITE_ANTHROPIC_API_KEY=sk-ant-...
+VITE_OPENAI_API_KEY=sk-proj-...   # optional — only needed for Journey Map image generation
 ```
-Stored in `app/.env.local` (gitignored via `*.local`).
+Stored in `app/.env.local` (gitignored via `*.local` in `app/.gitignore`).
+
+Template at `app/.env.example` (committed, no values).
+
+### Repository
+- GitHub: `https://github.com/MatthewGlibbery/touchpoints` (public)
+- Root `.gitignore` covers `.DS_Store`, `.claude/`, `node_modules/`, `*.local`
 
 ---
 
@@ -669,3 +677,5 @@ Stored in `app/.env.local` (gitignored via `*.local`).
 | Auto-switching Overview/Details mode on zoom | Removed — zoom threshold detection (`onMoveEnd`) was buggy; overview mode is now manual-only via ZoomToolbar center button |
 | Zoom percentage display in ZoomToolbar | Removed — ZoomToolbar is now a single `[− \| Details/Overview toggle \| +]` pill; no separate zoom % shown |
 | Separate "Generating overview…" floating badge | Removed — generating state is now shown inline in the ZoomToolbar center button (spinner + "Generating…" label) |
+| ReactFlow `selected` prop for ActionNode highlight | Replaced by store-derived `selectedNodeId === action.id`; ReactFlow's prop only updates on pointer interaction and lags behind programmatic navigation |
+| Arrow key node movement (ReactFlow default) | Disabled via `disableKeyboardA11y={true}` on `<ReactFlow>`; cards are grid-constrained and should never be nudged by keyboard |
