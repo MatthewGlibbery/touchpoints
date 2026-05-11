@@ -1,0 +1,169 @@
+import { memo, useState, useCallback, useRef, useEffect } from 'react';
+import type { NodeProps } from '@xyflow/react';
+import { GripHorizontal } from 'lucide-react';
+import type { Phase } from '../../../types/blueprint';
+import { useBlueprintStore } from '../../../store/blueprint.store';
+import { PHASE_HEADER_HEIGHT } from '../../../lib/layout';
+
+type PhaseHeaderData = { phase: Phase; width: number; colCount: number };
+// colCount kept in data for layout reference; column selection now handled by ColumnOverlayNode
+
+export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
+  const { phase, width } = data as PhaseHeaderData;
+  const updatePhase = useBlueprintStore((s) => s.updatePhase);
+  const movePhase = useBlueprintStore((s) => s.movePhase);
+  const setPhaseDragOffset = useBlueprintStore((s) => s.setPhaseDragOffset);
+  const setSelectedPhase = useBlueprintStore((s) => s.setSelectedPhase);
+  const presentMode = useBlueprintStore((s) => s.presentMode);
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(phase.name);
+  const [hovered, setHovered] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dragStartX = useRef(0);
+  const didDrag = useRef(false);
+  const threshold = width * 0.55;
+
+  useEffect(() => { setDraft(phase.name); }, [phase.name]);
+  useEffect(() => { if (editing) inputRef.current?.select(); }, [editing]);
+
+  const commitEdit = useCallback(() => {
+    const v = draft.trim();
+    if (v && v !== phase.name) updatePhase(phase.id, { name: v });
+    else setDraft(phase.name);
+    setEditing(false);
+  }, [draft, phase.id, phase.name, updatePhase]);
+
+  const onDivMouseDown = useCallback((e: React.MouseEvent) => {
+    if (presentMode || editing) return;
+    e.stopPropagation();
+    dragStartX.current = e.clientX;
+    didDrag.current = false;
+    setDragging(true);
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - dragStartX.current;
+      if (Math.abs(delta) > 4) didDrag.current = true;
+      setPhaseDragOffset({ phaseId: phase.id, offsetX: delta });
+      if (delta > threshold) {
+        movePhase(phase.id, 'right');
+        dragStartX.current = ev.clientX;
+        setPhaseDragOffset({ phaseId: phase.id, offsetX: 0 });
+      } else if (delta < -threshold) {
+        movePhase(phase.id, 'left');
+        dragStartX.current = ev.clientX;
+        setPhaseDragOffset({ phaseId: phase.id, offsetX: 0 });
+      }
+    };
+
+    const onUp = () => {
+      setDragging(false);
+      setPhaseDragOffset(null);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [phase.id, movePhase, setPhaseDragOffset, threshold, presentMode, editing]);
+
+  const showGrip = (hovered || dragging) && !editing;
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onMouseDown={onDivMouseDown}
+      onClick={(e) => {
+        if (presentMode || editing || didDrag.current) return;
+        e.stopPropagation();
+        setSelectedPhase(phase.id);
+      }}
+      style={{
+        width,
+        height: PHASE_HEADER_HEIGHT,
+        background: 'var(--surface-bg)',
+        borderBottom: '2px solid var(--border-strong)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '0 20px',
+        userSelect: 'none',
+        position: 'relative',
+        cursor: dragging ? 'grabbing' : (hovered && !editing ? 'grab' : 'default'),
+      }}
+    >
+      {/* Drag grip — visual affordance */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 10,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          cursor: dragging ? 'grabbing' : 'grab',
+          color: 'var(--text-muted)',
+          opacity: showGrip ? 1 : 0,
+          transition: 'opacity var(--transition-fast)',
+          display: 'flex',
+          alignItems: 'center',
+          padding: 4,
+          borderRadius: 4,
+          pointerEvents: 'none',
+        }}
+      >
+        <GripHorizontal size={14} />
+      </div>
+
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitEdit();
+            if (e.key === 'Escape') { setDraft(phase.name); setEditing(false); }
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            background: 'var(--surface-bg-muted)',
+            border: '1px solid var(--accent-primary)',
+            borderRadius: 6,
+            padding: '2px 8px',
+            outline: 'none',
+            textAlign: 'center',
+            width: Math.min(width - 60, 200),
+          }}
+        />
+      ) : (
+        <span
+          onDoubleClick={(e) => { if (presentMode) return; e.stopPropagation(); setEditing(true); }}
+          title="Double-click to rename"
+          style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            letterSpacing: '0.01em',
+            textAlign: 'center',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            maxWidth: '100%',
+            cursor: 'text',
+            padding: '2px 4px',
+            borderRadius: 4,
+            position: 'relative',
+            zIndex: 1,
+          }}
+        >
+          {phase.name}
+        </span>
+      )}
+
+    </div>
+  );
+});

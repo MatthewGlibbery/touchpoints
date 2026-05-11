@@ -1,0 +1,181 @@
+/* ─── Keyframes ─────────────────────────────────────────────────────────────── */
+
+@keyframes typingDot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-4px); opacity: 1; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.anim-slide-left  { animation: slideInLeft  var(--transition-normal) both; }
+.anim-slide-right { animation: slideInRight var(--transition-normal) both; }
+.anim-fade-up     { animation: fadeUp       var(--transition-fast)   both; }
+.anim-scale-in    { animation: scaleIn      var(--transition-fast)   both; }
+
+/* ─── Node reorder transitions ──────────────────────────────────────────────── */
+/* Applied via CSS so it reliably targets ReactFlow's wrapper transform.
+   BlueprintCanvas overrides with inline transition:none on cursor-driven nodes. */
+
+.react-flow__node-action,
+.react-flow__node-phaseHeader,
+.react-flow__node-actorLabel,
+.react-flow__node-swimlane,
+.react-flow__node-emptyCell,
+.react-flow__node-columnInserter,
+.react-flow__node-phaseBoundary,
+.react-flow__node-phaseAdder,
+.react-flow__node-actorAdder {
+  transition: transform 320ms ease-in-out;
+}
+
+/* ─── Action node connection handles ────────────────────────────────────────── */
+
+.react-flow__node-action .react-flow__handle {
+  width: 12px !important;
+  height: 12px !important;
+  background: var(--accent-primary) !important;
+  border: 2px solid var(--surface-bg) !important;
+  border-radius: 50% !important;
+  opacity: 0 !important;
+  pointer-events: all !important;
+  transition: opacity 0.12s;
+}
+
+/* Proximity-revealed handles set data-handle-visible via JS on the node wrapper */
+.react-flow__node-action[data-handle-near="top"] .react-flow__handle[data-handleid="top"],
+.react-flow__node-action[data-handle-near="bottom"] .react-flow__handle[data-handleid="bottom"],
+.react-flow__node-action[data-handle-near="left"] .react-flow__handle[data-handleid="left"],
+.react-flow__node-action[data-handle-near="right"] .react-flow__handle[data-handleid="right"] {
+  opacity: 0.75 !important;
+}
+
+/* Full opacity + larger size on direct hover or during active connection */
+.react-flow__node-action .react-flow__handle:hover,
+.react-flow__node-action .react-flow__handle.connectingfrom,
+.react-flow__node-action .react-flow__handle.connectingto {
+  opacity: 1 !important;
+  width: 16px !important;
+  height: 16px !important;
+  cursor: crosshair;
+}
+
+/* ─── Edge layer above nodes ─────────────────────────────────────────────────── */
+
+.react-flow__edges {
+  z-index: 1;
+}
+
+/* ─── Badge pill ────────────────────────────────────────────────────────────── */
+
+.badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: transform var(--transition-fast);
+  cursor: default;
+  user-select: none;
+}
+
+.badge-pill:hover {
+  transform: scale(1.08);
+}
+
+/* ─── Form inputs ───────────────────────────────────────────────────────────── */
+
+input:focus, textarea:focus {
+  border-color: var(--accent-primary) !important;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-primary-soft);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--canvas-bg);
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  border: none;
+  background: none;
+}
+
+input, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-primary);
+}
+
+.btn-primary {
+  background: var(--action-primary-bg);
+  color: var(--action-primary-text);
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  font-weight: 500;
+  transition: opacity 0.15s;
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  background: var(--surface-bg);
+  color: var(--text-primary);
+  font-weight: 500;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-ghost:hover {
+  background: var(--surface-bg-hover);
+  border-color: var(--border-strong);
+}
