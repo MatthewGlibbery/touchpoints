@@ -2,8 +2,6 @@
 
 An AI-assisted tool for creating and exploring service blueprints — structured maps that show how a service works across every actor, phase, and touchpoint.
 
-![Touchpoints canvas](Context/design_reference_1.png)
-
 ---
 
 ## What it does
