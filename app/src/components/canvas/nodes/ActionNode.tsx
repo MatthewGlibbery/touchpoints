@@ -2,7 +2,7 @@ import { memo, useState, useCallback, useRef, useEffect } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import {
   User, Globe, Building2, Users, Activity,
-  AlertCircle, Lightbulb, HelpCircle, Diamond,
+  AlertCircle, Lightbulb, HelpCircle, Diamond, ArrowRight,
 } from 'lucide-react';
 import type { Action } from '../../../types/blueprint';
 import { useBlueprintStore } from '../../../store/blueprint.store';
@@ -42,6 +42,7 @@ export const ActionNode = memo(({ data }: NodeProps) => {
   const presentMode = useBlueprintStore((s) => s.presentMode);
   const overviewMode = useBlueprintStore((s) => s.overviewMode);
   const selectedNodeId = useBlueprintStore((s) => s.selectedNodeId);
+  const blueprintStatuses = useBlueprintStore((s) => s.blueprint?.statuses ?? []);
   const selected = selectedNodeId === action.id;
 
   const [editing, setEditing] = useState(false);
@@ -115,6 +116,7 @@ export const ActionNode = memo(({ data }: NodeProps) => {
   const oppCount = action.opportunityIds.length;
   const qCount = (action.questionIds ?? []).length;
   const isDecisionPoint = (action.tags ?? []).includes('decision-point');
+  const hasStatusTransition = !!(action.statusTransition?.fromStatusId || action.statusTransition?.toStatusId);
   const hasBadges = painCount > 0 || oppCount > 0 || qCount > 0;
 
   const ActorIcon = ACTOR_ICONS[actorOrder % ACTOR_ICONS.length] ?? Activity;
@@ -124,13 +126,20 @@ export const ActionNode = memo(({ data }: NodeProps) => {
   const isMatch =
     (canvasView === 'pain-points'   && painCount > 0) ||
     (canvasView === 'opportunities' && oppCount > 0)  ||
-    (canvasView === 'questions'     && qCount > 0);
+    (canvasView === 'questions'     && qCount > 0)    ||
+    (canvasView === 'status'        && hasStatusTransition);
   const dimmed = isFiltered && !isMatch;
   const highlighted = isFiltered && isMatch;
 
-  const hColor = HIGHLIGHT_COLORS[canvasView] ?? '';
-  const hBg    = HIGHLIGHT_SOFT[canvasView]   ?? '';
-  const hGlow  = HIGHLIGHT_GLOW[canvasView]   ?? '';
+  // Status transition badge info
+  const toStatus = blueprintStatuses.find((s) => s.id === action.statusTransition?.toStatusId);
+  const fromStatus = blueprintStatuses.find((s) => s.id === action.statusTransition?.fromStatusId);
+
+  // For status view, use the "to" status color if available, otherwise a neutral teal
+  const statusHighlightColor = toStatus?.color ?? '#14B8A6';
+  const hColor = canvasView === 'status' ? statusHighlightColor : (HIGHLIGHT_COLORS[canvasView] ?? '');
+  const hBg    = canvasView === 'status' ? `${statusHighlightColor}38` : (HIGHLIGHT_SOFT[canvasView] ?? '');
+  const hGlow  = canvasView === 'status' ? `0 0 0 3px ${statusHighlightColor}30` : (HIGHLIGHT_GLOW[canvasView] ?? '');
 
   const borderColor = selected
     ? 'var(--accent-primary)'
@@ -439,6 +448,34 @@ export const ActionNode = memo(({ data }: NodeProps) => {
               )}
             </div>
           </>
+        )}
+
+        {/* Status transition badge */}
+        {hasStatusTransition && (
+          <div style={{
+            marginTop: hasBadges || firstMedia ? 6 : 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '3px 7px',
+            background: toStatus ? `${toStatus.color}14` : 'var(--surface-bg-muted)',
+            border: `1px solid ${toStatus ? `${toStatus.color}40` : 'var(--border-subtle)'}`,
+            borderRadius: 'var(--radius-pill)',
+            alignSelf: 'flex-start',
+            width: 'fit-content',
+          }}>
+            {fromStatus && (
+              <span style={{ fontSize: 10, fontWeight: 700, color: fromStatus.color }}>{fromStatus.label}</span>
+            )}
+            {fromStatus && toStatus && <ArrowRight size={9} color="var(--text-muted)" />}
+            {!fromStatus && toStatus && <ArrowRight size={9} color="var(--text-muted)" />}
+            {toStatus && (
+              <span style={{ fontSize: 10, fontWeight: 700, color: toStatus.color }}>{toStatus.label}</span>
+            )}
+            {!toStatus && fromStatus && (
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>cleared</span>
+            )}
+          </div>
         )}
       </div>
     </>

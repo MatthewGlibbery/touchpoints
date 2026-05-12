@@ -70,15 +70,18 @@ User input → AI (Claude tool use) → Blueprint (typed data model)
 ```typescript
 // app/src/types/blueprint.ts
 
-type Actor       = { id, name, color, order, bio?, goals? }
-type Phase       = { id, name, order, substepCount? }
-type ActionMedia = { id, type: 'image'|'gif'|'video', url, caption? }
-type Action      = { id, actorId, phaseId, label, labelDetailed?, labelAbstract?,
-                     touchpointIds, painPointIds, opportunityIds, questionIds, order,
-                     tags?,              // e.g. ['decision-point']
-                     media?,             // ActionMedia[]
-                     touchpointLabels?   // per-action touchpoint tag selections
-                   }
+type Actor            = { id, name, color, order, bio?, goals? }
+type Phase            = { id, name, order, substepCount?, description?, conditional?, conditionLabel? }
+type ActionMedia      = { id, type: 'image'|'gif'|'video', url, caption? }
+type StatusTransition = { fromStatusId?: string|null, toStatusId?: string|null }
+type ServiceStatus    = { id, label, color }
+type Action           = { id, actorId, phaseId, label, labelDetailed?, labelAbstract?,
+                          touchpointIds, painPointIds, opportunityIds, questionIds, order,
+                          tags?,              // e.g. ['decision-point']
+                          media?,             // ActionMedia[]
+                          touchpointLabels?,  // per-action touchpoint tag selections
+                          statusTransition?   // StatusTransition
+                        }
 type Touchpoint  = { id, label, type: 'interface' | 'system' | 'human' }
 type PainPoint   = { id, description, severity: 'low'|'medium'|'high', actionIds, aiGenerated?: true, guestContributed?: true, guestName?: string }
 type Opportunity = { id, description, actionIds, painPointIds, effort?, aiGenerated?: true, guestContributed?: true, guestName?: string }
@@ -112,6 +115,7 @@ type Blueprint   = { id, name, actors, phases, actions, touchpoints,
                      overviewActionIds?,       // IDs of AI-selected representative actions
                      overviewCellDescriptions?, // Record<"${actorId}-${phaseId}", string> — AI descriptions per cell
                      storyboards?,      // Journey Map storyboards
+                     statuses?,         // ServiceStatus[] — named status vocabulary
                    }
 
 // Storyboard / Journey Map types
@@ -290,7 +294,7 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 | Field | Type | Purpose |
 |---|---|---|
 | `mode` | `'onboarding'\|'canvas'` | App screen |
-| `canvasView` | `'edit'\|'pain-points'\|'opportunities'\|'questions'` | View filter |
+| `canvasView` | `'edit'\|'pain-points'\|'opportunities'\|'questions'\|'status'` | View filter |
 | `blueprint` | `Blueprint\|null` | Source of truth (full data incl. all versions) |
 | `rfNodes`, `rfEdges` | ReactFlow types | Derived layout, recalculated on every mutation |
 | `selectedNodeId` | `string\|null` | Opens NodeInspector |
@@ -328,6 +332,8 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 | `storyboardGenerating` | `boolean` | Full storyboard generation or `regenerateAllFrames` in flight |
 | `storyboardGeneratingFrameId` | `string\|null` | Frame currently being image-generated; drives per-card spinner |
 | `activeStoryboardId` | `string\|null` | Which storyboard is selected |
+| `undoStack` | `Blueprint[]` | Up to 50 past blueprint snapshots for undo |
+| `redoStack` | `Blueprint[]` | Up to 50 future snapshots for redo |
 
 NodeInspector and ActorPanel are **mutually exclusive**: opening one always closes the other.
 
@@ -371,6 +377,8 @@ The store uses two factory-level closures (`vRead`, `vWrite`) so all content mut
 - `setActorDragOffset(offset)` — set by ActorLabelNode on mousemove during row drag
 - `setPhaseDragOffset(offset)` — set by PhaseHeaderNode on mousemove during phase drag
 - `setOverviewMode(on)` — toggles overview mode; when `on`, recomputes layout via `blueprintToFlow(buildOverviewBlueprint(bp), { overviewMode: true })`; when off, recomputes normal layout
+- `undo()` / `redo()` — pop from `undoStack`/`redoStack`; call `apply(prev/next)` to restore blueprint + recalculate layout; keyboard: Cmd+Z / Cmd+Shift+Z (or Ctrl+Y); blocked when cursor is in an input/textarea
+- `addStatus(label, color)` / `updateStatus(id, patch)` / `removeStatus(id)` — manage the `blueprint.statuses` vocabulary; `removeStatus` cascades: clears `statusTransition` references in all actions that pointed to that status; all three call `pushHistory`
 - `generateOverview()` — calls Claude API to select representative actions (`overviewActionIds`) and generate `labelAbstract` per action; then calls `setOverviewMode(true)`
 - `setStoryboardMode(on)` — enters/exits Journey Map view; exits present/compare/overview modes
 - `createStoryboard(name)`, `deleteStoryboard(id)`, `setActiveStoryboard(id)`
@@ -425,7 +433,7 @@ Bootstraps from LocalStorage on module import.
 | Top-left | ProjectBar | Blueprint name (editable inline, click to edit); project switcher chevron |
 | Top-left (below ProjectBar) | VersionBar | "Current" (editable, double-click) + named version pills, fork (+), delete (×), Compare button; positioned `top: 56, left: 16` |
 | Top-centre | ModeBar | Blueprint (active) / Personas / Journey Maps (stubs) / Present |
-| Top-right | ViewBar | View filter: All / Pains / Opportunities / Questions |
+| Top-right | ViewBar | View filter: Edit / Pains / Opportunities / Questions / Status |
 | Left | NodeInspector | Opens on action click; slides in from left |
 | Left | ActorPanel | Opens on actor label click; slides in from left; mutually exclusive with NodeInspector |
 | Bottom-centre | EdgeInspector | Opens on edge click; slides up from bottom |
@@ -449,6 +457,23 @@ Full-screen replacement for the canvas when `storyboardMode: true`. Rendered as 
 
 ### Style preset library
 `StylePreset` entries are stored in localStorage key `touchpoints-style-presets` independently of any Blueprint. Presets carry only `baseStyle` (not character descriptions, which are actor-specific). CRUD via `app/src/lib/styleLibrary.ts` (`loadPresets`, `savePreset`, `deletePreset`). The Style Guide modal reads/writes presets directly — no store involvement.
+
+### Conditional phases
+A phase can be marked conditional (`phase.conditional = true`) via a toggle in `PhaseInspector` (Details tab). Conditional phases represent optional paths — e.g. a phase that only applies when a prior decision point goes a certain way.
+
+- **PhaseHeaderNode**: amber tint background + dashed amber bottom border; "IF: {conditionLabel}" or "OPTIONAL" badge pill in the top-right corner
+- **ColumnOverlayNode**: dashed amber side borders at rest; subtle amber diagonal stripe fill; amber selection highlight when selected
+- `conditionLabel?: string` — optional descriptive text set in PhaseInspector; appears in the badge as "IF: …"
+- `updatePhase` accepts `conditional` and `conditionLabel` in its patch type
+
+### Service statuses
+`blueprint.statuses` is a named vocabulary of `ServiceStatus` items (id, label, color). Actions can carry a `statusTransition` linking two statuses (from→to).
+
+- **Status view** (`canvasView === 'status'`): accessed via ViewBar dropdown; highlights action cards that have a `statusTransition`; uses the `toStatus.color` for the card tint/glow
+- **StatusPanel** (right-side panel when Status view active): lists all statuses with inline CRUD (add, double-click to rename, delete); below a divider, lists all actions that have a transition (phase + action name + from→to labels)
+- **Action card badge**: when `statusTransition` is set, a small pill at the bottom of the card shows `{from} → {to}` with status colors
+- **NodeInspector Details tab**: `StatusTransitionSection` — two `<select>` dropdowns (from / to); a "Clear transition" link when either is set; shows hint text if no statuses defined yet
+- `removeStatus` cascades: clears `statusTransition` references across all actions that pointed to the deleted status
 
 ### Confirmation modal (`ConfirmDeleteModal`)
 All destructive delete actions show a `ConfirmDeleteModal` before executing. Applies to: deleting a step (NodeInspector), deleting an actor (ActorPanel), deleting a named version (VersionBar), deleting a presentation (SlidePanel), and deleting an individual slide (SlidePanel keyframe strip). The modal renders at `z-index: 9000` with a Trash2 icon, title, description, Cancel, and Delete buttons.
@@ -725,6 +750,15 @@ Template at `app/.env.example` (committed, no values).
 
 ### Share link token generation
 `blueprint_shares.token` is generated **client-side** in `storage.ts` (`generateToken()` — `crypto.getRandomValues` → URL-safe base64) and passed explicitly on insert. The DB column has no default. The Supabase PostgreSQL version does not support `encode(..., 'base64url')`.
+
+### Hosting
+- **Platform**: Vercel (static SPA deploy)
+- **Root directory**: `app` (set in Vercel project settings — Vite project lives there, not repo root)
+- **Build command**: `npm run build` (auto-detected)
+- **Output directory**: `dist` (auto-detected)
+- **Env vars in Vercel**: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+- No `vercel.json` needed — app uses `?share=` query params, not path routing, so no SPA rewrite rules required
+- Every push to `main` auto-deploys
 
 ### Repository
 - GitHub: `https://github.com/MatthewGlibbery/touchpoints` (public)

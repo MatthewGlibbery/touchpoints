@@ -1,4 +1,4 @@
-import { useLayoutEffect, useCallback } from 'react';
+import { useLayoutEffect, useCallback, useEffect } from 'react';
 import { useBlueprintStore } from './store/blueprint.store';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { OnboardingOverlay } from './components/onboarding/OnboardingOverlay';
@@ -36,8 +36,24 @@ export default function App() {
   const isGuestView          = useBlueprintStore((s) => s.isGuestView);
   const guestCanComment      = useBlueprintStore((s) => s.guestCanComment);
   const guestName            = useBlueprintStore((s) => s.guestName);
+  const undo                 = useBlueprintStore((s) => s.undo);
+  const redo                 = useBlueprintStore((s) => s.redo);
 
   const closeLightbox = useCallback(() => setLightboxUrl(null), [setLightboxUrl]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
+      const target = e.target as HTMLElement;
+      const inInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      if (inInput) return;
+      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
 
   // useLayoutEffect fires before children's useEffect, ensuring data-theme is
   // set on the root before DotBackground reads the --canvas-grid CSS variable.
@@ -66,22 +82,29 @@ export default function App() {
 
       {inCanvas && !storyboardMode && (
         <>
-          {/* ── Standard edit UI — hidden in present, compare, and guest modes ── */}
-          {!presentMode && !compareMode && !isGuestView && (
+          {/* ── Standard edit UI — hidden in present and compare modes ── */}
+          {!presentMode && !compareMode && (
             <>
-              <ProjectBar />
+              {/* ModeBar + ViewBar visible to all including guests */}
               <ModeBar />
-              <VersionBar />
               <ViewBar />
-              {overviewMode && selectedOverviewCell ? <OverviewInspector /> : <NodeInspector />}
-              <ActorPanel />
-              <PhaseInspector />
-              <EdgeInspector />
+
+              {/* Owner-only UI */}
+              {!isGuestView && (
+                <>
+                  <ProjectBar />
+                  <VersionBar />
+                  {overviewMode && selectedOverviewCell ? <OverviewInspector /> : <NodeInspector />}
+                  <ActorPanel />
+                  <PhaseInspector />
+                  <EdgeInspector />
+                </>
+              )}
             </>
           )}
 
           {/* ── Guest view: read-only inspector (if open) ── */}
-          {isGuestView && inspectorOpen && <NodeInspector />}
+          {isGuestView && !presentMode && !compareMode && inspectorOpen && <NodeInspector />}
 
           {/* ── Compare mode (not presenting) — overlay extras only, no ModeBar ── */}
           {compareMode && !presentMode && (

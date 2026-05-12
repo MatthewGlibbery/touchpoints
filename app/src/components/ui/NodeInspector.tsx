@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, User, Globe, Building2, Users, Activity, Plus, Trash2, Diamond, Film, Image, Tag as TagIcon, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { X, User, Globe, Building2, Users, Activity, Plus, Trash2, Diamond, Film, Image, Tag as TagIcon, ChevronLeft, ChevronRight, Sparkles, ArrowRight } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
-import type { PainPoint, Opportunity, Question, ActionMedia } from '../../types/blueprint';
+import type { PainPoint, Opportunity, Question, ActionMedia, StatusTransition } from '../../types/blueprint';
 import { Panel, IconButton, FieldBlock, TabBar, inputStyle } from './primitives';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
@@ -183,6 +183,17 @@ export function NodeInspector() {
             <FieldBlock label="Media">
               <MediaSection action={action} onUpdate={(media) => updateAction(action.id, { media })} onLightbox={setLightboxUrl} />
             </FieldBlock>
+
+            {/* Status transition */}
+            {!isGuestView && (
+              <FieldBlock label="Status transition">
+                <StatusTransitionSection
+                  transition={action.statusTransition}
+                  statuses={blueprint?.statuses ?? []}
+                  onChange={(t) => updateAction(action.id, { statusTransition: t })}
+                />
+              </FieldBlock>
+            )}
           </>
         )}
 
@@ -638,6 +649,54 @@ function MediaSection({
           Add
         </button>
       </div>
+    </div>
+  );
+}
+
+function StatusTransitionSection({ transition, statuses, onChange }: {
+  transition?: import('../../types/blueprint').StatusTransition;
+  statuses: import('../../types/blueprint').ServiceStatus[];
+  onChange: (t: import('../../types/blueprint').StatusTransition | undefined) => void;
+}) {
+  const fromId = transition?.fromStatusId ?? '';
+  const toId = transition?.toStatusId ?? '';
+
+  const handleChange = (fromVal: string, toVal: string) => {
+    if (!fromVal && !toVal) { onChange(undefined); }
+    else { onChange({ fromStatusId: fromVal || null, toStatusId: toVal || null }); }
+  };
+
+  if (statuses.length === 0) {
+    return (
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+        No statuses defined yet. Open the Status view (top-right dropdown) to create statuses.
+      </p>
+    );
+  }
+
+  const selectStyle: React.CSSProperties = { ...inputStyle, fontSize: 12, flex: 1 };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <select value={fromId as string} onChange={(e) => handleChange(e.target.value, toId as string)} style={selectStyle}>
+          <option value="">— from —</option>
+          {statuses.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+        </select>
+        <ArrowRight size={13} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+        <select value={toId as string} onChange={(e) => handleChange(fromId as string, e.target.value)} style={selectStyle}>
+          <option value="">— to —</option>
+          {statuses.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+        </select>
+      </div>
+      {(fromId || toId) && (
+        <button
+          onClick={() => onChange(undefined)}
+          style={{ fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: 0, textDecoration: 'underline' }}
+        >
+          Clear transition
+        </button>
+      )}
     </div>
   );
 }

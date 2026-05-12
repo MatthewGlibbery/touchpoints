@@ -13,6 +13,8 @@ export type Phase = {
   order: number;
   substepCount?: number;
   description?: string;
+  conditional?: boolean;
+  conditionLabel?: string;
 };
 
 export type ActionMedia = {
@@ -20,6 +22,17 @@ export type ActionMedia = {
   type: 'image' | 'gif' | 'video';
   url: string;
   caption?: string;
+};
+
+export type StatusTransition = {
+  fromStatusId?: string | null;
+  toStatusId?: string | null;
+};
+
+export type ServiceStatus = {
+  id: string;
+  label: string;
+  color: string;
 };
 
 export type Action = {
@@ -37,6 +50,7 @@ export type Action = {
   order: number;
   tags?: string[];
   media?: ActionMedia[];
+  statusTransition?: StatusTransition;
 };
 
 export type Question = {
@@ -161,6 +175,7 @@ export type Blueprint = {
   overviewActionIds?: string[];  // IDs of actions selected for semantic overview zoom
   overviewCellDescriptions?: Record<string, string>;  // key = "${actorId}-${phaseId}"
   storyboards?: Storyboard[];
+  statuses?: ServiceStatus[];
   createdAt: string;
   updatedAt: string;
 };

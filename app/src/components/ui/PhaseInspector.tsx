@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, User, Globe, Building2, Users, Activity, Sparkles, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { X, User, Globe, Building2, Users, Activity, Sparkles, ChevronLeft, ChevronRight, Trash2, GitBranch } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { Panel, IconButton, FieldBlock, TabBar, inputStyle } from './primitives';
@@ -22,6 +22,7 @@ export function PhaseInspector() {
   const [activeTab, setActiveTab] = useState<Tab>('details');
   const [nameDraft, setNameDraft] = useState('');
   const [descDraft, setDescDraft] = useState('');
+  const [conditionDraft, setConditionDraft] = useState('');
   const [generating, setGenerating] = useState(false);
   const [confirmDeletePhase, setConfirmDeletePhase] = useState(false);
 
@@ -69,6 +70,7 @@ export function PhaseInspector() {
     if (phase) {
       setNameDraft(phase.name);
       setDescDraft(phase.description ?? '');
+      setConditionDraft(phase.conditionLabel ?? '');
     }
     setActiveTab('details');
   }, [phase?.id]);
@@ -209,6 +211,64 @@ Write a concise 1-2 sentence description of what this phase of the service journ
                 </button>
               </div>
             </FieldBlock>
+
+            {/* Conditional phase toggle */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                onClick={() => updatePhase(phase.id, { conditional: !phase.conditional, conditionLabel: phase.conditional ? undefined : conditionDraft || undefined })}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '9px 12px',
+                  background: phase.conditional ? 'rgba(245,158,11,0.08)' : 'var(--surface-bg-muted)',
+                  border: phase.conditional ? '1px solid rgba(245,158,11,0.3)' : '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  color: phase.conditional ? '#D97706' : 'var(--text-secondary)',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <GitBranch size={14} />
+                <span style={{ fontSize: 13, fontWeight: 600 }}>
+                  {phase.conditional ? 'Conditional phase' : 'Mark as conditional'}
+                </span>
+                <div
+                  style={{
+                    marginLeft: 'auto',
+                    width: 30,
+                    height: 16,
+                    borderRadius: 8,
+                    background: phase.conditional ? '#D97706' : 'var(--border-strong)',
+                    position: 'relative',
+                    transition: 'background 0.15s',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: phase.conditional ? 16 : 2,
+                    width: 12,
+                    height: 12,
+                    borderRadius: '50%',
+                    background: 'white',
+                    transition: 'left 0.15s',
+                  }} />
+                </div>
+              </button>
+              {phase.conditional && (
+                <input
+                  value={conditionDraft}
+                  onChange={(e) => setConditionDraft(e.target.value)}
+                  onBlur={() => updatePhase(phase.id, { conditionLabel: conditionDraft.trim() || undefined })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  placeholder="e.g. if document failed verification…"
+                  style={{ ...inputStyle, fontSize: 12 }}
+                />
+              )}
+            </div>
           </>
         )}
 

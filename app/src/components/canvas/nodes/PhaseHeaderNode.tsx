@@ -1,6 +1,6 @@
 import { memo, useState, useCallback, useRef, useEffect } from 'react';
 import type { NodeProps } from '@xyflow/react';
-import { GripHorizontal } from 'lucide-react';
+import { GripHorizontal, GitBranch } from 'lucide-react';
 import type { Phase } from '../../../types/blueprint';
 import { useBlueprintStore } from '../../../store/blueprint.store';
 import { PHASE_HEADER_HEIGHT } from '../../../lib/layout';
@@ -83,8 +83,8 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
       style={{
         width,
         height: PHASE_HEADER_HEIGHT,
-        background: 'var(--surface-bg)',
-        borderBottom: '2px solid var(--border-strong)',
+        background: phase.conditional ? 'rgba(245,158,11,0.05)' : 'var(--surface-bg)',
+        borderBottom: phase.conditional ? '2px dashed rgba(245,158,11,0.5)' : '2px solid var(--border-strong)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -114,6 +114,29 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
       >
         <GripHorizontal size={14} />
       </div>
+
+      {phase.conditional && (
+        <div style={{
+          position: 'absolute',
+          top: 5,
+          right: 8,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 3,
+          padding: '1px 5px',
+          background: 'rgba(245,158,11,0.12)',
+          border: '1px solid rgba(245,158,11,0.3)',
+          borderRadius: 'var(--radius-pill)',
+          fontSize: 9,
+          fontWeight: 700,
+          color: '#D97706',
+          letterSpacing: '0.04em',
+          pointerEvents: 'none',
+        }}>
+          <GitBranch size={8} />
+          {phase.conditionLabel ? `IF: ${phase.conditionLabel}` : 'OPTIONAL'}
+        </div>
+      )}
 
       {editing ? (
         <input

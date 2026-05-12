@@ -5,10 +5,10 @@ import { useBlueprintStore } from '../../../store/blueprint.store';
 import { PHASE_WIDTH } from '../../../lib/layout';
 import { ConfirmDeleteModal } from '../../ui/ConfirmDeleteModal';
 
-type ColumnOverlayData = { phaseId: string; order: number; colCount: number; height: number };
+type ColumnOverlayData = { phaseId: string; order: number; colCount: number; height: number; conditional?: boolean };
 
 export const ColumnOverlayNode = memo(({ data }: NodeProps) => {
-  const { phaseId, order, colCount, height } = data as ColumnOverlayData;
+  const { phaseId, order, colCount, height, conditional } = data as ColumnOverlayData;
   const blueprint = useBlueprintStore((s) => s.blueprint);
   const setSelectedColumnKey = useBlueprintStore((s) => s.setSelectedColumnKey);
   const selectedColumnKey = useBlueprintStore((s) => s.selectedColumnKey);
@@ -65,12 +65,20 @@ export const ColumnOverlayNode = memo(({ data }: NodeProps) => {
         width: PHASE_WIDTH,
         height,
         position: 'relative',
-        background: selected ? 'rgba(59,130,246,0.03)' : 'transparent',
+        background: conditional
+          ? selected
+            ? 'rgba(245,158,11,0.07)'
+            : 'repeating-linear-gradient(135deg, rgba(245,158,11,0.04) 0px, rgba(245,158,11,0.04) 1px, transparent 1px, transparent 12px)'
+          : selected ? 'rgba(59,130,246,0.03)' : 'transparent',
         cursor: 'default',
         transition: 'background 0.15s',
         boxSizing: 'border-box',
-        borderLeft: selected ? '2px solid rgba(59,130,246,0.25)' : '2px solid transparent',
-        borderRight: selected ? '2px solid rgba(59,130,246,0.25)' : '2px solid transparent',
+        borderLeft: selected
+          ? conditional ? '2px solid rgba(245,158,11,0.35)' : '2px solid rgba(59,130,246,0.25)'
+          : conditional ? '2px dashed rgba(245,158,11,0.25)' : '2px solid transparent',
+        borderRight: selected
+          ? conditional ? '2px solid rgba(245,158,11,0.35)' : '2px solid rgba(59,130,246,0.25)'
+          : conditional ? '2px dashed rgba(245,158,11,0.25)' : '2px solid transparent',
       }}
     >
       {/* Control bar — grip + delete, shown only when selected and multi-column */}

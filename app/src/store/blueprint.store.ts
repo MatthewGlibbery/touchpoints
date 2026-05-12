@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { Node, Edge } from '@xyflow/react';
-import type { Blueprint, BlueprintVersion, Action, Actor, Phase, PainPoint, Opportunity, Question, EdgeMeta, CustomEdge, Presentation, PresentationKeyframe, Storyboard, StoryboardFrame, StoryboardStyleGuide } from '../types/blueprint';
+import type { Blueprint, BlueprintVersion, Action, Actor, Phase, PainPoint, Opportunity, Question, EdgeMeta, CustomEdge, Presentation, PresentationKeyframe, Storyboard, StoryboardFrame, StoryboardStyleGuide, ServiceStatus } from '../types/blueprint';
 import { generateStyleGuide, generateFrameStructure, buildImagePrompt, generateImage } from '../lib/storyboard';
 import { blueprintToFlow, computeColumnData, getBlueprintForVersion, ACTION_NODE_WIDTH, estimateActionHeight } from '../lib/layout';
 import { saveBlueprint, loadBlueprint, loadAllBlueprints, switchBlueprint, fetchBlueprintsFromCloud, migrateLocalBlueprints, importBlueprintsToCloud } from '../lib/storage';
@@ -10,7 +10,7 @@ import { getSession, onAuthStateChange, signOut as authSignOut } from '../lib/au
 import { supabase } from '../lib/supabase';
 
 type AppMode = 'onboarding' | 'canvas' | 'auth';
-type CanvasView = 'edit' | 'pain-points' | 'opportunities' | 'questions';
+type CanvasView = 'edit' | 'pain-points' | 'opportunities' | 'questions' | 'status';
 
 type DragTarget = { actorId: string; phaseId: string; order: number };
 type ActorDragOffset = { actorId: string; offsetY: number };
@@ -111,7 +111,7 @@ type AppState = {
   removeActor: (id: string) => void;
   moveActor: (id: string, direction: 'up' | 'down') => void;
   addPhase: (name: string) => void;
-  updatePhase: (id: string, patch: Partial<Pick<Phase, 'name' | 'description'>>) => void;
+  updatePhase: (id: string, patch: Partial<Pick<Phase, 'name' | 'description' | 'conditional' | 'conditionLabel'>>) => void;
   removePhase: (id: string) => void;
   movePhase: (id: string, direction: 'left' | 'right') => void;
   movePhaseBoundary: (leftPhaseId: string, rightPhaseId: string, direction: 'left' | 'right') => void;
@@ -205,6 +205,17 @@ type AppState = {
   regenerateFrame: (storyboardId: string, frameId: string) => Promise<void>;
   regenerateAllFrames: (storyboardId: string) => Promise<void>;
   reorderStoryboardFrames: (storyboardId: string, fromIdx: number, toIdx: number) => void;
+
+  // Undo / Redo
+  undoStack: Blueprint[];
+  redoStack: Blueprint[];
+  undo: () => void;
+  redo: () => void;
+
+  // Statuses
+  addStatus: (label: string, color: string) => void;
+  updateStatus: (id: string, patch: Partial<Pick<ServiceStatus, 'label' | 'color'>>) => void;
+  removeStatus: (id: string) => void;
 };
 
 // Returns a blueprint filtered to only overview actions, with substep columns collapsed.
@@ -315,6 +326,13 @@ export const useBlueprintStore = create<AppState>()(
       }
     };
 
+    // Push current blueprint to undo stack before a mutation; clears redo stack
+    const pushHistory = () => {
+      const { blueprint, undoStack } = get();
+      if (!blueprint) return;
+      set({ undoStack: [...undoStack, blueprint].slice(-50), redoStack: [] });
+    };
+
     // Compute layout using active version's data and save
     const apply = (bp: Blueprint) => {
       const { activeVersionId, overviewMode } = get();
@@ -375,8 +393,28 @@ export const useBlueprintStore = create<AppState>()(
       storyboardGenerating: false,
       storyboardGeneratingFrameId: null,
       activeStoryboardId: null,
+      undoStack: [],
+      redoStack: [],
 
       setMode: (mode) => set({ mode }),
+
+      undo: () => {
+        const { undoStack, blueprint } = get();
+        if (undoStack.length === 0 || !blueprint) return;
+        const prev = undoStack[undoStack.length - 1];
+        const newRedoStack = [blueprint, ...get().redoStack].slice(0, 50);
+        set({ undoStack: undoStack.slice(0, -1), redoStack: newRedoStack });
+        apply(prev);
+      },
+
+      redo: () => {
+        const { redoStack, blueprint } = get();
+        if (redoStack.length === 0 || !blueprint) return;
+        const next = redoStack[0];
+        const newUndoStack = [...get().undoStack, blueprint].slice(-50);
+        set({ undoStack: newUndoStack, redoStack: redoStack.slice(1) });
+        apply(next);
+      },
 
       setCanvasView: (canvasView) => set({ canvasView }),
 
@@ -650,6 +688,7 @@ export const useBlueprintStore = create<AppState>()(
       updateAction: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, { actions: eff.actions.map((a) => a.id === id ? { ...a, ...patch } : a) })));
       },
@@ -657,6 +696,7 @@ export const useBlueprintStore = create<AppState>()(
       addAction: (actorId, phaseId, order) => {
         const { blueprint, activeVersionId } = get();
         if (!blueprint) return;
+        pushHistory();
         const id = `act-${Date.now()}`;
         const newAction: Action = { id, actorId, phaseId, order, label: 'New step', touchpointIds: [], painPointIds: [], opportunityIds: [], questionIds: [] };
         const eff = vRead();
@@ -670,6 +710,7 @@ export const useBlueprintStore = create<AppState>()(
       removeAction: (id) => {
         const { blueprint, selectedNodeId, activeVersionId } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         const painIdsToRemove = eff.painPoints
           .filter((p) => p.actionIds.length === 1 && p.actionIds[0] === id)
@@ -707,6 +748,7 @@ export const useBlueprintStore = create<AppState>()(
       insertSubstep: (phaseId, atOrder) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const { phaseColumns } = computeColumnData(blueprint);
         const currentCount = phaseColumns.get(phaseId)?.colCount ?? 1;
         const eff = vRead();
@@ -728,6 +770,7 @@ export const useBlueprintStore = create<AppState>()(
       addPainPoint: (actionId, description, severity) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const id = `pp-${Date.now()}`;
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, {
@@ -741,6 +784,7 @@ export const useBlueprintStore = create<AppState>()(
       updatePainPoint: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, { painPoints: eff.painPoints.map((p) => {
           if (p.id !== id) return p;
@@ -752,6 +796,7 @@ export const useBlueprintStore = create<AppState>()(
       removePainPoint: (id) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, {
           painPoints: eff.painPoints.filter((p) => p.id !== id),
@@ -764,6 +809,7 @@ export const useBlueprintStore = create<AppState>()(
       addOpportunity: (actionId, description) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const id = `opp-${Date.now()}`;
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, {
@@ -777,6 +823,7 @@ export const useBlueprintStore = create<AppState>()(
       updateOpportunity: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, { opportunities: eff.opportunities.map((o) => {
           if (o.id !== id) return o;
@@ -788,6 +835,7 @@ export const useBlueprintStore = create<AppState>()(
       removeOpportunity: (id) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, {
           opportunities: eff.opportunities.filter((o) => o.id !== id),
@@ -800,6 +848,7 @@ export const useBlueprintStore = create<AppState>()(
       addQuestion: (actionId, text) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const id = `q-${Date.now()}`;
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, {
@@ -813,6 +862,7 @@ export const useBlueprintStore = create<AppState>()(
       updateQuestion: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, { questions: eff.questions.map((q) => {
           if (q.id !== id) return q;
@@ -824,6 +874,7 @@ export const useBlueprintStore = create<AppState>()(
       removeQuestion: (id) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, {
           questions: eff.questions.filter((q) => q.id !== id),
@@ -836,6 +887,7 @@ export const useBlueprintStore = create<AppState>()(
       addActor: (name) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const newActor: Actor = { id: `actor-${Date.now()}`, name, color: nextColor(blueprint.actors), order: blueprint.actors.length };
         apply(updatedAt({ ...blueprint, actors: [...blueprint.actors, newActor] }));
       },
@@ -843,6 +895,7 @@ export const useBlueprintStore = create<AppState>()(
       updateActor: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         apply(updatedAt({ ...blueprint, actors: blueprint.actors.map((a) => a.id === id ? { ...a, ...patch } : a) }));
       },
 
@@ -850,6 +903,7 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint, selectedActorId } = get();
         const activeVersionId = get().activeVersionId;
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         const actorActionIds = eff.actions.filter((a) => a.actorId === id).map((a) => a.id);
         const actorActionIdSet = new Set(actorActionIds);
@@ -886,6 +940,7 @@ export const useBlueprintStore = create<AppState>()(
       moveActor: (id, direction) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const sorted = [...blueprint.actors].sort((a, b) => a.order - b.order);
         const idx = sorted.findIndex((a) => a.id === id);
         const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
@@ -905,6 +960,7 @@ export const useBlueprintStore = create<AppState>()(
       addPhase: (name) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const newPhase: Phase = { id: `phase-${Date.now()}`, name, order: blueprint.phases.length };
         apply(updatedAt({ ...blueprint, phases: [...blueprint.phases, newPhase] }));
       },
@@ -912,6 +968,7 @@ export const useBlueprintStore = create<AppState>()(
       updatePhase: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         apply(updatedAt({ ...blueprint, phases: blueprint.phases.map((p) => p.id === id ? { ...p, ...patch } : p) }));
       },
 
@@ -919,6 +976,7 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint, selectedPhaseId } = get();
         const activeVersionId = get().activeVersionId;
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         const phaseActionIds = eff.actions.filter((a) => a.phaseId === id).map((a) => a.id);
         const phaseActionIdSet = new Set(phaseActionIds);
@@ -954,6 +1012,7 @@ export const useBlueprintStore = create<AppState>()(
       movePhase: (id, direction) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const sorted = [...blueprint.phases].sort((a, b) => a.order - b.order);
         const idx = sorted.findIndex((p) => p.id === id);
         const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
@@ -973,6 +1032,7 @@ export const useBlueprintStore = create<AppState>()(
       movePhaseBoundary: (leftPhaseId, rightPhaseId, direction) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const { phaseColumns } = computeColumnData(blueprint);
         const leftCol = phaseColumns.get(leftPhaseId);
         const rightCol = phaseColumns.get(rightPhaseId);
@@ -1025,6 +1085,7 @@ export const useBlueprintStore = create<AppState>()(
       updateEdgeMeta: (edgeId, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const current = blueprint.edgeMeta?.[edgeId] ?? {};
         const next = { ...current, ...patch };
         apply(updatedAt({ ...blueprint, edgeMeta: { ...(blueprint.edgeMeta ?? {}), [edgeId]: next } }));
@@ -1033,6 +1094,7 @@ export const useBlueprintStore = create<AppState>()(
       removeEdge: (edgeId) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const isCustom = (blueprint.customEdges ?? []).some((e) => e.id === edgeId);
         if (isCustom) {
           apply(updatedAt({ ...blueprint, customEdges: (blueprint.customEdges ?? []).filter((e) => e.id !== edgeId) }));
@@ -1046,6 +1108,7 @@ export const useBlueprintStore = create<AppState>()(
       addCustomEdge: (sourceActionId, targetActionId, sourceHandle, targetHandle) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const id = `custom-${sourceActionId}-${targetActionId}-${Date.now()}`;
         const ce: CustomEdge = { id, sourceActionId, targetActionId, sourceHandle, targetHandle };
         apply(updatedAt({ ...blueprint, customEdges: [...(blueprint.customEdges ?? []), ce] }));
@@ -1056,6 +1119,7 @@ export const useBlueprintStore = create<AppState>()(
       addTouchpointTag: (name) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const trimmed = name.trim();
         if (!trimmed) return;
         const existing = blueprint.touchpointTags ?? [];
@@ -1066,6 +1130,7 @@ export const useBlueprintStore = create<AppState>()(
       removeTouchpointTag: (name) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         apply(updatedAt(vWrite({
           ...blueprint,
@@ -1081,6 +1146,7 @@ export const useBlueprintStore = create<AppState>()(
       toggleActionTouchpointLabel: (actionId, tag) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         apply(updatedAt(vWrite(blueprint, {
           actions: eff.actions.map((a) => {
@@ -1101,6 +1167,7 @@ export const useBlueprintStore = create<AppState>()(
       createVersion: (name) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const eff = vRead();
         const id = `ver-${Date.now()}`;
         const newVersion: BlueprintVersion = {
@@ -1131,6 +1198,7 @@ export const useBlueprintStore = create<AppState>()(
       deleteVersion: (versionId) => {
         const { blueprint, activeVersionId, compareVersionIds } = get();
         if (!blueprint) return;
+        pushHistory();
         const newVersions = (blueprint.versions ?? []).filter((v) => v.id !== versionId);
         const newActiveId = activeVersionId === versionId ? null : activeVersionId;
         const newCompareIds: [string | null, string | null] = [
@@ -1354,6 +1422,7 @@ export const useBlueprintStore = create<AppState>()(
       deleteSubstep: (phaseId, order) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const { phaseColumns } = computeColumnData(blueprint);
         const col = phaseColumns.get(phaseId);
         if (!col || col.colCount <= 1) return;
@@ -1373,6 +1442,7 @@ export const useBlueprintStore = create<AppState>()(
       moveSubstep: (phaseId, fromOrder, direction) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const { phaseColumns } = computeColumnData(blueprint);
         const col = phaseColumns.get(phaseId);
         if (!col) return;
@@ -1392,6 +1462,7 @@ export const useBlueprintStore = create<AppState>()(
       renameBlueprint: (name) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const trimmed = name.trim();
         if (!trimmed) return;
         apply(updatedAt({ ...blueprint, name: trimmed }));
@@ -1400,9 +1471,55 @@ export const useBlueprintStore = create<AppState>()(
       renameBaseVersion: (name) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        pushHistory();
         const trimmed = name.trim();
         if (!trimmed) return;
         apply(updatedAt({ ...blueprint, baseVersionName: trimmed }));
+      },
+
+      // ─── Statuses ──────────────────────────────────────────────────────────
+
+      addStatus: (label, color) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+        const id = `status-${Date.now()}`;
+        apply(updatedAt({ ...blueprint, statuses: [...(blueprint.statuses ?? []), { id, label, color }] }));
+      },
+
+      updateStatus: (id, patch) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+        apply(updatedAt({ ...blueprint, statuses: (blueprint.statuses ?? []).map((s) => s.id === id ? { ...s, ...patch } : s) }));
+      },
+
+      removeStatus: (id) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+        const eff = vRead();
+        // Clear transitions that reference this status
+        const cleanedBp = updatedAt(vWrite({
+          ...blueprint,
+          statuses: (blueprint.statuses ?? []).filter((s) => s.id !== id),
+        }, {
+          actions: eff.actions.map((a) => {
+            if (!a.statusTransition) return a;
+            const { fromStatusId, toStatusId } = a.statusTransition;
+            if (fromStatusId !== id && toStatusId !== id) return a;
+            const cleaned = {
+              fromStatusId: fromStatusId === id ? null : fromStatusId,
+              toStatusId: toStatusId === id ? null : toStatusId,
+            };
+            if (cleaned.fromStatusId == null && cleaned.toStatusId == null) {
+              const { statusTransition: _, ...rest } = a;
+              return rest;
+            }
+            return { ...a, statusTransition: cleaned };
+          }),
+        }));
+        apply(cleanedBp);
       },
 
       // ─── Overview / semantic zoom ───────────────────────────────────────────

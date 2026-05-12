@@ -132,7 +132,7 @@ export function blueprintToFlow(
         id: `coloverlay-${phase.id}-${order}`,
         type: 'columnOverlay',
         position: { x: ACTOR_LABEL_WIDTH + colIndex * PHASE_WIDTH, y: PHASE_HEADER_HEIGHT },
-        data: { phaseId: phase.id, order, colCount: col.colCount, height: totalCanvasHeight },
+        data: { phaseId: phase.id, order, colCount: col.colCount, height: totalCanvasHeight, conditional: phase.conditional ?? false },
         draggable: false, selectable: false, zIndex: 0,
         style: { pointerEvents: 'all' },
       });

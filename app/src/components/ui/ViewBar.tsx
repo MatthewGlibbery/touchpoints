@@ -1,16 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
-import { AlertCircle, Lightbulb, HelpCircle, Pencil, X, ChevronDown, Presentation } from 'lucide-react';
+import { AlertCircle, Lightbulb, HelpCircle, Pencil, X, ChevronDown, Presentation, CircleDot, Plus, Trash2, ArrowRight } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import type { Blueprint } from '../../types/blueprint';
-import { Panel, IconButton } from './primitives';
+import { Panel, IconButton, inputStyle } from './primitives';
 
-type CanvasView = 'edit' | 'pain-points' | 'opportunities' | 'questions';
+type CanvasView = 'edit' | 'pain-points' | 'opportunities' | 'questions' | 'status';
 
 const VIEW_META: Record<CanvasView, { label: string; icon: React.ReactNode }> = {
   'edit':          { label: 'Edit',          icon: <Pencil size={12} /> },
   'pain-points':   { label: 'Pains',         icon: <AlertCircle size={12} /> },
   'opportunities': { label: 'Opportunities', icon: <Lightbulb size={12} /> },
   'questions':     { label: 'Questions',     icon: <HelpCircle size={12} /> },
+  'status':        { label: 'Status',        icon: <CircleDot size={12} /> },
 };
 
 export function ViewBar() {
@@ -35,11 +36,14 @@ export function ViewBar() {
   const currentMeta = VIEW_META[canvasView];
   const inPresentation = presentMode || presentationEditMode;
 
+  const statusTransitionCount = blueprint?.actions.filter((a) => a.statusTransition?.fromStatusId || a.statusTransition?.toStatusId).length ?? 0;
+
   const views: { id: CanvasView; count?: number }[] = [
     { id: 'edit' },
     { id: 'pain-points',   count: blueprint?.painPoints.length },
     { id: 'opportunities', count: blueprint?.opportunities.length },
     { id: 'questions',     count: (blueprint?.questions ?? []).length },
+    { id: 'status',        count: statusTransitionCount || undefined },
   ];
 
   function selectView(id: CanvasView) {
@@ -194,14 +198,17 @@ export function ViewBar() {
         )}
       </div>
 
-      {canvasView !== 'edit' && blueprint && (
-        <ViewPanel view={canvasView} blueprint={blueprint} />
+      {canvasView !== 'edit' && blueprint && canvasView !== 'status' && (
+        <ViewPanel view={canvasView as Exclude<CanvasView, 'edit' | 'status'>} blueprint={blueprint} />
+      )}
+      {canvasView === 'status' && blueprint && (
+        <StatusPanel blueprint={blueprint} />
       )}
     </>
   );
 }
 
-function ViewPanel({ view, blueprint }: { view: Exclude<CanvasView, 'edit'>; blueprint: Blueprint }) {
+function ViewPanel({ view, blueprint }: { view: Exclude<CanvasView, 'edit' | 'status'>; blueprint: Blueprint }) {
   const setCanvasView = useBlueprintStore((s) => s.setCanvasView);
   const items = view === 'pain-points'
     ? blueprint.painPoints
@@ -307,6 +314,165 @@ function ViewPanel({ view, blueprint }: { view: Exclude<CanvasView, 'edit'>; blu
             </div>
           );
         })}
+      </div>
+    </Panel>
+  );
+}
+
+const STATUS_PALETTE = ['#3B82F6', '#8B5CF6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6', '#F97316'];
+
+function StatusPanel({ blueprint }: { blueprint: Blueprint }) {
+  const setCanvasView = useBlueprintStore((s) => s.setCanvasView);
+  const addStatus = useBlueprintStore((s) => s.addStatus);
+  const updateStatus = useBlueprintStore((s) => s.updateStatus);
+  const removeStatus = useBlueprintStore((s) => s.removeStatus);
+
+  const [newLabel, setNewLabel] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+
+  const statuses = blueprint.statuses ?? [];
+
+  const handleAdd = () => {
+    const label = newLabel.trim();
+    if (!label) return;
+    const color = STATUS_PALETTE[statuses.length % STATUS_PALETTE.length];
+    addStatus(label, color);
+    setNewLabel('');
+  };
+
+  const actionsWithTransition = blueprint.actions.filter(
+    (a) => a.statusTransition?.fromStatusId || a.statusTransition?.toStatusId
+  );
+
+  return (
+    <Panel
+      animateFrom="right"
+      style={{
+        position: 'fixed',
+        top: 60,
+        right: 16,
+        width: 320,
+        maxHeight: 'calc(100vh - 80px)',
+        zIndex: 49,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <div style={{ padding: '14px 16px 0', flexShrink: 0, position: 'relative' }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>Status</span>
+        <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--text-muted)' }}>{actionsWithTransition.length} transition{actionsWithTransition.length !== 1 ? 's' : ''}</span>
+        <IconButton
+          icon={<X size={13} />}
+          onClick={() => setCanvasView('edit')}
+          style={{ position: 'absolute', top: 12, right: 12 }}
+        />
+        <div style={{ height: 1, background: 'var(--border-subtle)', marginTop: 12 }} />
+      </div>
+
+      <div style={{ overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Status vocabulary */}
+        <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 4px' }}>
+          Statuses
+        </p>
+
+        {statuses.length === 0 && (
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+            No statuses yet. Add one below.
+          </p>
+        )}
+
+        {statuses.map((s) => (
+          <div key={s.id} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '7px 10px',
+            background: 'var(--surface-bg-muted)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)',
+          }}>
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: s.color, flexShrink: 0 }} />
+            {editingId === s.id ? (
+              <input
+                value={editDraft}
+                onChange={(e) => setEditDraft(e.target.value)}
+                onBlur={() => { if (editDraft.trim()) updateStatus(s.id, { label: editDraft.trim() }); setEditingId(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingId(null); }}
+                autoFocus
+                style={{ ...inputStyle, fontSize: 12, flex: 1, padding: '2px 6px' }}
+              />
+            ) : (
+              <span
+                style={{ fontSize: 13, fontWeight: 600, color: s.color, flex: 1, cursor: 'pointer' }}
+                onDoubleClick={() => { setEditingId(s.id); setEditDraft(s.label); }}
+                title="Double-click to rename"
+              >
+                {s.label}
+              </span>
+            )}
+            <button
+              onClick={() => removeStatus(s.id)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2, display: 'flex' }}
+            >
+              <Trash2 size={11} />
+            </button>
+          </div>
+        ))}
+
+        {/* Add status */}
+        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+          <input
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
+            placeholder="New status…"
+            style={{ ...inputStyle, fontSize: 12, flex: 1 }}
+          />
+          <button
+            onClick={handleAdd}
+            disabled={!newLabel.trim()}
+            style={{
+              display: 'flex', alignItems: 'center', padding: '0 10px',
+              background: newLabel.trim() ? 'var(--accent-primary)' : 'var(--surface-bg-muted)',
+              color: newLabel.trim() ? '#fff' : 'var(--text-muted)',
+              border: 'none', borderRadius: 'var(--radius-md)', cursor: newLabel.trim() ? 'pointer' : 'not-allowed',
+              fontSize: 12, fontWeight: 600,
+            }}
+          >
+            <Plus size={12} />
+          </button>
+        </div>
+
+        {actionsWithTransition.length > 0 && (
+          <>
+            <div style={{ height: 1, background: 'var(--border-subtle)', margin: '4px 0' }} />
+            <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 4px' }}>
+              Transitions
+            </p>
+            {actionsWithTransition.map((action) => {
+              const from = statuses.find((s) => s.id === action.statusTransition?.fromStatusId);
+              const to = statuses.find((s) => s.id === action.statusTransition?.toStatusId);
+              const phase = blueprint.phases.find((p) => p.id === action.phaseId);
+              return (
+                <div key={action.id} style={{
+                  padding: '8px 10px',
+                  background: 'var(--surface-bg-muted)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  display: 'flex', flexDirection: 'column', gap: 4,
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{action.label}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    {from && <span style={{ fontSize: 11, fontWeight: 700, color: from.color }}>{from.label}</span>}
+                    {from && to && <ArrowRight size={10} color="var(--text-muted)" />}
+                    {!from && to && <ArrowRight size={10} color="var(--text-muted)" />}
+                    {to && <span style={{ fontSize: 11, fontWeight: 700, color: to.color }}>{to.label}</span>}
+                  </div>
+                  {phase && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{phase.name}</span>}
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
     </Panel>
   );

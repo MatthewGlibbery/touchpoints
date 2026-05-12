@@ -2,7 +2,26 @@
 
 ## Current Objective
 
-Auth and share links now working on localhost. Next step: deploy the app so share links are usable by real recipients.
+Session AI committed and pushed to `origin/main`. App auto-deploys to Vercel on every push.
+
+---
+
+## Session AI Progress — COMPLETE
+
+- [x] AI1 — **Undo/Redo**: `undoStack: Blueprint[]` + `redoStack: Blueprint[]` in store (50-level cap); `undo()` / `redo()` actions; `pushHistory()` called before every content mutation (38 call sites covering actions, phases, actors, pain points, opps, questions, edges, touchpoints, versions, statuses); Cmd+Z / Cmd+Shift+Z (Ctrl+Y on Windows) keyboard shortcuts in `App.tsx` — blocked when cursor is in an input/textarea
+- [x] AI2 — **Guest mode UI fix**: `ModeBar` (Blueprint/Personas/Journey Maps) and `ViewBar` (Pains/Opps/Questions/Status) now visible to guests; owner-only UI (`ProjectBar`, `VersionBar`, inspectors) remains gated by `!isGuestView`
+- [x] AI3 — **Conditional phases**: `conditional?: boolean` + `conditionLabel?: string` on `Phase` type; toggle in `PhaseInspector` Details tab (amber styling, GitBranch icon, inline condition label input); `PhaseHeaderNode` renders amber dashed border + "IF: {label}" or "OPTIONAL" badge; `ColumnOverlayNode` shows dashed amber side borders + diagonal stripe fill; `updatePhase` signature updated; `layout.ts` passes `conditional` to `columnOverlay` node data
+- [x] AI4 — **Service statuses + Status view**: `ServiceStatus` type (id, label, color) + `StatusTransition` type (fromStatusId, toStatusId); `Blueprint.statuses?` array; `addStatus`/`updateStatus`/`removeStatus` store actions (removeStatus cascades to clear action transitions); `canvasView` extended with `'status'`; `StatusPanel` right-side panel in `ViewBar` (add/rename/delete statuses + transitions list); `StatusTransitionSection` in `NodeInspector` Details tab (from→to selects + clear link); status transition badge pill on `ActionNode` cards; Status view highlights cards with transitions using `toStatus.color`
+
+---
+
+## Session Deploy Progress — COMPLETE
+
+- [x] `app/index.html` title changed from `"app"` → `"Touchpoints"`
+- [x] All sessions AD–AH code committed (`5c722fa`) and pushed to `origin/main`
+- [x] Vercel auto-deploys on every push to `main`
+- [x] Supabase Auth → URL Configuration must include production Vercel URL + `http://localhost:5173` for local dev
+- [x] Custom SMTP (Resend) configured in Supabase to bypass 2-email/hour free-tier limit
 
 ---
 
