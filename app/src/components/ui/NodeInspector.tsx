@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, User, Globe, Building2, Users, Activity, Plus, Trash2, Diamond, Film, Image, Tag as TagIcon, ChevronLeft, ChevronRight, Sparkles, ArrowRight } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
-import type { PainPoint, Opportunity, Question, ActionMedia, StatusTransition } from '../../types/blueprint';
+import type { PainPoint, Opportunity, Question, ActionMedia } from '../../types/blueprint';
 import { Panel, IconButton, FieldBlock, TabBar, inputStyle } from './primitives';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
@@ -43,6 +43,9 @@ export function NodeInspector() {
   const [labelDraft, setLabelDraft] = useState('');
   const [detailDraft, setDetailDraft] = useState('');
 
+  // Tracks which tab the guest is drafting a new item for (deferred insert until non-empty)
+  const [guestDraft, setGuestDraft] = useState<'pain' | 'opp' | 'question' | null>(null);
+
   const action = blueprint?.actions.find((a) => a.id === selectedNodeId) ?? null;
   const actor = action ? blueprint?.actors.find((a) => a.id === action.actorId) : null;
   const painPoints = action ? blueprint!.painPoints.filter((p) => action.painPointIds.includes(p.id)) : [];
@@ -76,7 +79,11 @@ export function NodeInspector() {
     const requested = useBlueprintStore.getState().inspectorRequestedTab;
     setActiveTab((requested as Tab) ?? 'details');
     if (requested) clearInspectorRequestedTab();
+    setGuestDraft(null);
   }, [action?.id]);
+
+  // Discard any pending draft when switching tabs
+  useEffect(() => { setGuestDraft(null); }, [activeTab]);
 
   // Handle badge click on the already-selected node (action?.id doesn't change)
   useEffect(() => {
@@ -206,8 +213,16 @@ export function NodeInspector() {
                 onUpdate={(patch) => updatePainPoint(pp.id, patch)}
                 onRemove={() => removePainPoint(pp.id)} />
             ))}
+            {isGuestView && guestDraft === 'pain' && (
+              <GuestDraftItem
+                placeholder="Describe the pain point…"
+                color="rgba(239,68,68,"
+                onSubmit={(text) => { addGuestPainPoint(action.id, text, 'medium'); setGuestDraft(null); }}
+                onDiscard={() => setGuestDraft(null)}
+              />
+            )}
             {!isGuestView && <AddButton onClick={() => addPainPoint(action.id, '', 'medium')} label="Add pain point" />}
-            {isGuestView && guestCanComment && <AddButton onClick={() => addGuestPainPoint(action.id, '', 'medium')} label="Add pain point" />}
+            {isGuestView && guestCanComment && !guestDraft && <AddButton onClick={() => setGuestDraft('pain')} label="Add pain point" />}
           </>
         )}
 
@@ -220,8 +235,16 @@ export function NodeInspector() {
                 onUpdate={(patch) => updateOpportunity(opp.id, patch)}
                 onRemove={() => removeOpportunity(opp.id)} />
             ))}
+            {isGuestView && guestDraft === 'opp' && (
+              <GuestDraftItem
+                placeholder="Describe the opportunity…"
+                color="rgba(34,197,94,"
+                onSubmit={(text) => { addGuestOpportunity(action.id, text); setGuestDraft(null); }}
+                onDiscard={() => setGuestDraft(null)}
+              />
+            )}
             {!isGuestView && <AddButton onClick={() => addOpportunity(action.id, '')} label="Add opportunity" />}
-            {isGuestView && guestCanComment && <AddButton onClick={() => addGuestOpportunity(action.id, '')} label="Add opportunity" />}
+            {isGuestView && guestCanComment && !guestDraft && <AddButton onClick={() => setGuestDraft('opp')} label="Add opportunity" />}
           </>
         )}
 
@@ -234,8 +257,16 @@ export function NodeInspector() {
                 onUpdate={(patch) => updateQuestion(q.id, patch)}
                 onRemove={() => removeQuestion(q.id)} />
             ))}
+            {isGuestView && guestDraft === 'question' && (
+              <GuestDraftItem
+                placeholder="What do you need to know?"
+                color="rgba(245,158,11,"
+                onSubmit={(text) => { addGuestQuestion(action.id, text); setGuestDraft(null); }}
+                onDiscard={() => setGuestDraft(null)}
+              />
+            )}
             {!isGuestView && <AddButton onClick={() => addQuestion(action.id, '')} label="Add question" />}
-            {isGuestView && guestCanComment && <AddButton onClick={() => addGuestQuestion(action.id, '')} label="Add question" />}
+            {isGuestView && guestCanComment && !guestDraft && <AddButton onClick={() => setGuestDraft('question')} label="Add question" />}
           </>
         )}
 
@@ -390,6 +421,48 @@ function QuestionItem({ q, isGuestView, onUpdate, onRemove }: { q: Question; isG
         readOnly={readonly}
         onChange={(e) => !readonly && onUpdate({ text: e.target.value })}
         rows={2} style={{ ...inputStyle, resize: 'none', background: 'transparent', border: '1px solid transparent', padding: '2px 4px', fontSize: 13 }} />
+    </div>
+  );
+}
+
+function GuestDraftItem({ placeholder, color, onSubmit, onDiscard }: {
+  placeholder: string;
+  color: string; // rgba prefix, e.g. "rgba(239,68,68,"
+  onSubmit: (text: string) => void;
+  onDiscard: () => void;
+}) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const textRef = useRef('');
+  const doneRef = useRef(false);
+  const [text, setText] = useState('');
+
+  useEffect(() => { setTimeout(() => taRef.current?.focus(), 50); }, []);
+
+  const commit = (discard?: boolean) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    if (!discard && textRef.current.trim()) onSubmit(textRef.current.trim());
+    else onDiscard();
+  };
+
+  return (
+    <div style={{
+      padding: '10px 12px', background: `${color}0.05)`,
+      border: `1px solid ${color}0.2)`, borderRadius: 'var(--radius-md)',
+    }}>
+      <textarea
+        ref={taRef}
+        value={text}
+        onChange={(e) => { setText(e.target.value); textRef.current = e.target.value; }}
+        onBlur={() => commit()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(); }
+          if (e.key === 'Escape') commit(true);
+        }}
+        placeholder={placeholder}
+        rows={2}
+        style={{ ...inputStyle, resize: 'none', background: 'transparent', border: '1px solid transparent', padding: '2px 4px', fontSize: 13, display: 'block', width: '100%', boxSizing: 'border-box' }}
+      />
     </div>
   );
 }

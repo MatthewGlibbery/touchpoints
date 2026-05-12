@@ -108,7 +108,7 @@ export type PresentationKeyframe = {
   label?: string;
   viewport: { x: number; y: number; zoom: number };
   versionId?: string | null;
-  canvasView?: 'edit' | 'pain-points' | 'opportunities' | 'questions';
+  canvasView?: 'edit' | 'pain-points' | 'opportunities' | 'questions' | 'status';
   selectedNodeId?: string | null;
   compareMode?: boolean;
   compareVersionIds?: [string | null, string | null];

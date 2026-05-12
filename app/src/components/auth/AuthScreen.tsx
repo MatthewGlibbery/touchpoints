@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { sendOTP, verifyOTP } from '../../lib/auth';
+import { sendOTP } from '../../lib/auth';
 import { useBlueprintStore } from '../../store/blueprint.store';
-import { GitBranch, ArrowRight, RotateCcw, Upload } from 'lucide-react';
+import { GitBranch, ArrowRight, RotateCcw, Upload, Mail } from 'lucide-react';
 
 // ─── Canvas dot background (same as OnboardingOverlay) ───────────────────────
 
@@ -139,7 +139,7 @@ function MigrationStep({ count, loading, onConfirm, onSkip }: {
 
 // ─── AuthScreen ───────────────────────────────────────────────────────────────
 
-type Step = 'email' | 'otp' | 'migration';
+type Step = 'email' | 'sent' | 'migration';
 
 export function AuthScreen() {
   const pendingMigration = useBlueprintStore((s) => s.pendingMigration);
@@ -148,11 +148,9 @@ export function AuthScreen() {
 
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const emailRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { emailRef.current?.focus(); }, []);
@@ -169,60 +167,23 @@ export function AuthScreen() {
     setError(null);
     try {
       await sendOTP(email.trim());
-      setStep('otp');
-      setTimeout(() => inputRefs.current[0]?.focus(), 50);
+      setStep('sent');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to send code');
+      setError(err instanceof Error ? err.message : 'Failed to send link');
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleOTPSubmit(code: string) {
+  async function handleResend() {
     setLoading(true);
     setError(null);
     try {
-      await verifyOTP(email.trim(), code);
-      // onAuthStateChange in the store will handle setUser + mode switch
+      await sendOTP(email.trim());
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Invalid code');
-      setOtp(['', '', '', '', '', '']);
-      setTimeout(() => inputRefs.current[0]?.focus(), 50);
+      setError(err instanceof Error ? err.message : 'Failed to resend');
     } finally {
       setLoading(false);
-    }
-  }
-
-  function handleOTPChange(idx: number, val: string) {
-    const char = val.replace(/\D/g, '').slice(-1);
-    const next = [...otp];
-    next[idx] = char;
-    setOtp(next);
-    if (char && idx < 5) {
-      inputRefs.current[idx + 1]?.focus();
-    }
-    const full = next.join('');
-    if (full.length === 6) {
-      handleOTPSubmit(full);
-    }
-  }
-
-  function handleOTPKeyDown(idx: number, e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Backspace' && !otp[idx] && idx > 0) {
-      inputRefs.current[idx - 1]?.focus();
-    }
-  }
-
-  function handleOTPPaste(e: React.ClipboardEvent) {
-    const text = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-    if (text.length > 0) {
-      e.preventDefault();
-      const next = ['', '', '', '', '', ''];
-      for (let i = 0; i < text.length; i++) next[i] = text[i];
-      setOtp(next);
-      const focusIdx = Math.min(text.length, 5);
-      inputRefs.current[focusIdx]?.focus();
-      if (text.length === 6) handleOTPSubmit(text);
     }
   }
 
@@ -293,7 +254,7 @@ export function AuthScreen() {
         {step === 'email' ? (
           <form onSubmit={handleEmailSubmit}>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.5 }}>
-              Enter your email to sign in or create an account. We'll send a 6-digit code.
+              Enter your email to sign in or create an account. We'll send a magic link.
             </p>
             <div style={{ marginBottom: 12 }}>
               <input
@@ -314,59 +275,53 @@ export function AuthScreen() {
               {loading ? 'Sending…' : <><span>Continue</span><ArrowRight size={14} /></>}
             </button>
           </form>
-        ) : step === 'otp' ? (
+        ) : step === 'sent' ? (
           <div>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6, lineHeight: 1.5 }}>
-              Enter the 6-digit code sent to
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 48, height: 48, borderRadius: '50%',
+              background: 'var(--accent-primary-soft)',
+              margin: '0 auto 16px',
+            }}>
+              <Mail size={22} color="var(--accent-primary)" />
+            </div>
+            <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8, textAlign: 'center' }}>
+              Check your email
             </p>
-            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 20 }}>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 4, textAlign: 'center' }}>
+              We sent a magic link to
+            </p>
+            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 20, textAlign: 'center' }}>
               {email}
             </p>
-
-            {/* OTP digit boxes */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }} onPaste={handleOTPPaste}>
-              {otp.map((digit, i) => (
-                <input
-                  key={i}
-                  ref={(el) => { inputRefs.current[i] = el; }}
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={digit}
-                  onChange={(e) => handleOTPChange(i, e.target.value)}
-                  onKeyDown={(e) => handleOTPKeyDown(i, e)}
-                  disabled={loading}
-                  style={{
-                    width: 44, height: 48,
-                    textAlign: 'center',
-                    fontSize: 20,
-                    fontWeight: 700,
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'var(--surface-bg-muted)',
-                    color: 'var(--text-primary)',
-                    outline: 'none',
-                    caretColor: 'var(--accent-primary)',
-                  }}
-                />
-              ))}
-            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55, marginBottom: 20, textAlign: 'center' }}>
+              Click the link in the email to sign in. You can close this tab.
+            </p>
 
             {error && (
               <p style={{ fontSize: 12, color: 'var(--accent-danger)', marginBottom: 10 }}>{error}</p>
             )}
 
-            {loading && (
-              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>Verifying…</p>
-            )}
-
             <button
-              onClick={() => { setStep('email'); setOtp(['','','','','','']); setError(null); }}
+              onClick={handleResend}
+              disabled={loading}
+              style={{
+                ...btnStyle,
+                background: 'var(--surface-bg-muted)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border-subtle)',
+                marginBottom: 8,
+              }}
+            >
+              {loading ? 'Sending…' : 'Resend link'}
+            </button>
+            <button
+              onClick={() => { setStep('email'); setError(null); }}
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
                 color: 'var(--text-muted)', fontSize: 12,
                 display: 'flex', alignItems: 'center', gap: 4,
-                padding: 0, marginTop: 4,
+                padding: 0, margin: '4px auto 0',
               }}
             >
               <RotateCcw size={11} /> Use a different email

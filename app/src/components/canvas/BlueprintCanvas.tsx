@@ -200,6 +200,8 @@ export function BlueprintCanvas() {
       (opts) => instance.fitView(opts ?? {}),
       (x, y, opts) => instance.setCenter(x, y, opts ?? {}),
     );
+    // Fit view on every canvas mount (handles return from storyboard/compare mode)
+    requestAnimationFrame(() => instance.fitView({ padding: 0.15, duration: 500 }));
   }, []);
 
   useEffect(() => {
