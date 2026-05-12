@@ -2,7 +2,7 @@
 
 ## Current Objective
 
-All planned sessions (A through AI) complete. App deployed to Vercel. Post-launch bug fixes in progress (commit `602830c`).
+All planned sessions (A through AJ) complete. App stable and deployed to Vercel. No active session.
 
 ---
 
@@ -34,11 +34,20 @@ GitHub repo (`https://github.com/MatthewGlibbery/touchpoints`, public). Style pr
 - **Service statuses**: `ServiceStatus` vocabulary, `StatusTransition` on actions, Status view + StatusPanel, status badge on action cards, `StatusTransitionSection` in NodeInspector Details tab
 
 ### Post-launch bug fixes (commit `602830c`)
-- **Guest comments blank**: `addGuestPainPoint/Opp/Q` was called immediately with empty description, inserting a blank row into `guest_comments`; subsequent typing via `updatePainPoint` failed silently (guest RLS blocks blueprint writes). Fixed with a local draft state in NodeInspector — `addGuest*` is only called on textarea blur with non-empty text.
-- **Auth: magic link flow**: replaced the 6-box OTP UI with a "Check your email" screen; auth callback already handled by `onAuthStateChange → SIGNED_IN` in the store.
-- **fitView on storyboard exit**: `BlueprintCanvas` remounts when leaving Journey Maps; added `requestAnimationFrame(() => instance.fitView(...))` in `onInit` so every canvas mount triggers a zoom-to-fit.
-- **Type fix**: added `'status'` to `PresentationKeyframe.canvasView` union (pre-existing mismatch with the store's `canvasView` type).
-- **Resend spam note**: URL mismatch (supabase.co magic link URL vs custom sending domain) is a Supabase infrastructure limit — requires Supabase Pro custom domain to fully resolve. Check Outlook Junk as a workaround.
+- **Guest comments blank**: fixed with local draft state in NodeInspector — `addGuest*` only called on textarea blur with non-empty text.
+- **Auth: magic link flow**: replaced 6-box OTP UI with a "Check your email" screen.
+- **fitView on storyboard exit**: `requestAnimationFrame(() => instance.fitView(...))` in `onInit`.
+- **Type fix**: `'status'` added to `PresentationKeyframe.canvasView` union.
+- **Resend spam**: URL mismatch is a Supabase infrastructure limit (requires Pro custom domain). Check Outlook Junk as workaround.
+
+### Session AJ: Backlog (commit `2ea27ff`)
+- **New project state cleanup**: `startFromScratch()` now resets `storyboardMode`, `compareVersionIds`, and all UI flags.
+- **Named version rename**: double-click any named version pill in VersionBar → inline edit → `renameVersion(versionId, name)`.
+- **Semantic zoom in SplitCanvas**: Details/Overview toggle in SplitCanvas top bar; local state, independent of main canvas; triggers `generateOverview()` if needed, auto-enables on completion.
+- **AI actor portraits**: `portraitUrl?` on Actor; `generateActorPortrait(actorId)` store action; `actorPortraitGenerating` state; ActorPanel shows portrait with floating Regenerate, or Generate placeholder.
+- **ErrorBoundary** in `main.tsx` wrapping App — friendly crash screen with Reload button.
+- **Canvas bg fix**: `background: 'var(--canvas-bg)'` on root div prevents flash on load.
+- **setUser bootstrap**: wrapped in try/catch; falls back to onboarding on error.
 
 ---
 
@@ -82,19 +91,6 @@ create table guest_comments (
 ```
 
 ---
-
-### Session AJ: Backlog items (complete)
-
-- **New project state cleanup** — `startFromScratch()` now resets all UI flags including `storyboardMode: false` and `compareVersionIds: [null, null]`, matching `switchToBlueprint()`.
-- **Named version rename** — Double-click any named version pill in VersionBar to rename inline. `renameVersion(versionId, name)` store action implemented.
-- **Semantic zoom in SplitCanvas** — "Details/Overview" pill in SplitCanvas top bar uses local `overviewMode` state (independent of main canvas). Triggers `generateOverview()` if data not yet generated; auto-enables once complete. Both panels use `buildOverviewBlueprint`.
-- **AI actor portraits** — `portraitUrl?: string` on Actor type. `generateActorPortrait(actorId)` store action; `actorPortraitGenerating` state. ActorPanel shows full-width portrait with floating "Regenerate" overlay, or a "Generate AI portrait" placeholder button with spinner.
-
----
-
-## Open Questions
-
-None.
 
 ---
 

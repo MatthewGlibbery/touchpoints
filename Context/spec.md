@@ -70,7 +70,7 @@ User input → AI (Claude tool use) → Blueprint (typed data model)
 ```typescript
 // app/src/types/blueprint.ts
 
-type Actor            = { id, name, color, order, bio?, goals? }
+type Actor            = { id, name, color, order, bio?, goals?, portraitUrl? }
 type Phase            = { id, name, order, substepCount?, description?, conditional?, conditionLabel? }
 type ActionMedia      = { id, type: 'image'|'gif'|'video', url, caption? }
 type StatusTransition = { fromStatusId?: string|null, toStatusId?: string|null }
@@ -336,6 +336,7 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 | `storyboardGenerating` | `boolean` | Full storyboard generation or `regenerateAllFrames` in flight |
 | `storyboardGeneratingFrameId` | `string\|null` | Frame currently being image-generated; drives per-card spinner |
 | `activeStoryboardId` | `string\|null` | Which storyboard is selected |
+| `actorPortraitGenerating` | `string\|null` | `actorId` currently being portrait-generated; null when idle |
 | `undoStack` | `Blueprint[]` | Up to 50 past blueprint snapshots for undo |
 | `redoStack` | `Blueprint[]` | Up to 50 future snapshots for redo |
 
@@ -355,6 +356,7 @@ The store uses two factory-level closures (`vRead`, `vWrite`) so all content mut
 ### Key actions
 - `setBlueprint` — layout recalc + save + mode switch to canvas; restores `activeVersionId` from persisted blueprint
 - `switchToBlueprint(id)` — load saved blueprint by ID; resets compareMode, presentMode, presentationEditMode
+- `startFromScratch()` — creates a blank blueprint and resets ALL UI flags: compareMode, compareVersionIds, presentMode, presentationEditMode, storyboardMode, overviewMode, all panels/selection, undo/redo stacks
 - `updateAction`, `addAction`, `removeAction`, `insertSubstep`
 - `deleteSubstep(phaseId, order)` — removes actions in that column, shifts higher-order actions down, decrements `substepCount`; no-op if only one column remains
 - `moveSubstep(phaseId, fromOrder, direction)` — swaps actions between two adjacent columns
@@ -365,7 +367,7 @@ The store uses two factory-level closures (`vRead`, `vWrite`) so all content mut
 - `addActor`, `updateActor`, `moveActor`, `addPhase`, `updatePhase`, `movePhase`, `movePhaseBoundary`
 - `updateEdgeMeta`, `removeEdge`, `addCustomEdge`
 - `addTouchpointTag`, `removeTouchpointTag`, `toggleActionTouchpointLabel`
-- `createVersion`, `switchVersion`, `deleteVersion`
+- `createVersion`, `switchVersion`, `deleteVersion`, `renameVersion(versionId, name)` — inline rename of named version pill (double-click in VersionBar)
 - `setSelectedNode`, `setSelectedActor`, `setSelectedEdge`, `toggleTheme`
 - `setSelectedColumnKey(key)` — sets selected column; cleared on pane click
 - `setMultiSelectedNodeIds(ids)` — set by BlueprintCanvas `onSelectionChange`; drives SelectionToolbar visibility
@@ -403,6 +405,7 @@ The store uses two factory-level closures (`vRead`, `vWrite`) so all content mut
 - `generateStoryboard()` — full pipeline: generate style guide (Claude) → frame structure (Claude) → image prompts → images (DALL-E 3) sequentially
 - `regenerateFrame(storyboardId, frameId)` — regenerates image for a single frame using stored `imagePrompt`
 - `regenerateAllFrames(storyboardId)` — regenerates images for all frames sequentially; uses `storyboardGenerating` + `storyboardGeneratingFrameId` for progress tracking
+- `generateActorPortrait(actorId)` — builds prompt from actor name+bio, calls `ai-storyboard` edge function (DALL-E 3), stores URL as `actor.portraitUrl`; `actorPortraitGenerating` tracks in-flight actorId
 
 `removeAction` cascades: removes orphaned pain points / opportunities / questions (those with no other actionIds), removes custom edges involving that action (from base), and closes the inspector if it was open.
 
@@ -508,6 +511,8 @@ When `presentationEditMode` is true and `presentMode` is false:
 
 ### Compare mode (SplitCanvas)
 When `compareMode` is true, `SplitCanvas` renders as the canvas layer (no longer an early return — App.tsx renders it as the canvas background, allowing other UI to overlay). It renders two side-by-side read-only ReactFlow instances, each computing its own nodes/edges via `blueprintToFlow(getBlueprintForVersion(...))` — not from the store's `rfNodes`/`rfEdges`. Version selectors in the top bar allow changing which two versions are shown. "Exit compare" button in top-right.
+
+A **Details/Overview** toggle button in the SplitCanvas top bar enables semantic zoom independently of the main canvas. Uses local `overviewMode` state in `SplitCanvas.tsx`. If `blueprint.overviewActionIds` is already populated it switches immediately; otherwise it triggers `generateOverview()` and auto-enables once generation completes. Both panels use `blueprintToFlow(buildOverviewBlueprint(bp), { overviewMode: true })`.
 
 A **Sync** toggle button in the SplitCanvas top bar enables bidirectional pan/zoom sync between the two panels (highlighted when active). Sync is implemented via a module-level bridge in `SplitCanvas.tsx` (`_rfA`/`_rfB` instances + `_syncing` flag); each panel's `onMove` broadcasts to the other when `compareSyncViewport` is true.
 
@@ -664,7 +669,8 @@ app/src/
 ├── styles/
 │   ├── tokens.css
 │   └── global.css
-└── main.tsx / App.tsx
+└── main.tsx           ← mounts App; wraps in ErrorBoundary (friendly crash screen + Reload)
+└── App.tsx            ← top-level mode router; renders canvas, onboarding, auth, lightbox overlay
 ```
 
 ---
@@ -801,7 +807,6 @@ Template at `app/.env.example` (committed, no values).
 | Chips/pills on action cards | Removed — replaced by compact badge pills |
 | React state for handle hover visibility | Causes the card wrapper to intercept mouse events — CSS-only approach required |
 | `position: relative` wrapper on ActionNode | Handles at card edges intercept mousedown, hijacking node drag — reverted to fragment |
-| AI portrait generation | ActorPanel placeholder ready; image generation not yet wired |
 | Version edge data (edgeMeta/customEdges per version) | Edges are shared across versions; per-version edge customisation deferred |
 | Named version rename in VersionBar | Only create/delete supported for named versions; rename deferred. Base version LABEL ('Current') is renameable via 'Current' pill (`renameBaseVersion`). Blueprint NAME is renameable via ProjectBar title (`renameBlueprint`). These are distinct. |
 | Divider between media and badge pills on action card | Removed — media flows directly into badge area with spacing only |
