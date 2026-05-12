@@ -83,16 +83,21 @@ create table guest_comments (
 
 ---
 
+### Session AJ: Backlog items (complete)
+
+- **New project state cleanup** — `startFromScratch()` now resets all UI flags including `storyboardMode: false` and `compareVersionIds: [null, null]`, matching `switchToBlueprint()`.
+- **Named version rename** — Double-click any named version pill in VersionBar to rename inline. `renameVersion(versionId, name)` store action implemented.
+- **Semantic zoom in SplitCanvas** — "Details/Overview" pill in SplitCanvas top bar uses local `overviewMode` state (independent of main canvas). Triggers `generateOverview()` if data not yet generated; auto-enables once complete. Both panels use `buildOverviewBlueprint`.
+- **AI actor portraits** — `portraitUrl?: string` on Actor type. `generateActorPortrait(actorId)` store action; `actorPortraitGenerating` state. ActorPanel shows full-width portrait with floating "Regenerate" overlay, or a "Generate AI portrait" placeholder button with spinner.
+
+---
+
 ## Open Questions
 
-- **"New project" state cleanup** — blueprint stays in store memory until new one is submitted; visually fine but slightly impure.
-- **AI portrait** — ActorPanel placeholder styled and ready; AI image generation not yet wired.
+None.
 
 ---
 
 ## Future Backlog
 
 - **Real-time collaboration** — enable Supabase Realtime on `blueprints` table; no schema changes needed (schema has `updated_at`/`updated_by` ready)
-- **Semantic zoom in compare mode** — overview mode currently only applies to main BlueprintCanvas
-- **AI portrait** — wire up image generation for actor avatars
-- **Named version rename** — VersionBar only supports create/delete for named versions; rename deferred
