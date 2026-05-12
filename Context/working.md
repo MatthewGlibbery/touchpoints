@@ -2,7 +2,7 @@
 
 ## Current Objective
 
-All planned sessions (A through AI) complete. App deployed to Vercel. Spec and working docs cleaned up after last commit (`e0233d7`).
+All planned sessions (A through AI) complete. App deployed to Vercel. Post-launch bug fixes in progress (commit `602830c`).
 
 ---
 
@@ -32,6 +32,13 @@ GitHub repo (`https://github.com/MatthewGlibbery/touchpoints`, public). Style pr
 - **Guest UI fix**: ModeBar + ViewBar visible in guest view; owner-only UI remains gated
 - **Conditional phases**: `conditional` + `conditionLabel` on Phase; amber dashed styling on PhaseHeaderNode + ColumnOverlayNode; toggle + label input in PhaseInspector
 - **Service statuses**: `ServiceStatus` vocabulary, `StatusTransition` on actions, Status view + StatusPanel, status badge on action cards, `StatusTransitionSection` in NodeInspector Details tab
+
+### Post-launch bug fixes (commit `602830c`)
+- **Guest comments blank**: `addGuestPainPoint/Opp/Q` was called immediately with empty description, inserting a blank row into `guest_comments`; subsequent typing via `updatePainPoint` failed silently (guest RLS blocks blueprint writes). Fixed with a local draft state in NodeInspector — `addGuest*` is only called on textarea blur with non-empty text.
+- **Auth: magic link flow**: replaced the 6-box OTP UI with a "Check your email" screen; auth callback already handled by `onAuthStateChange → SIGNED_IN` in the store.
+- **fitView on storyboard exit**: `BlueprintCanvas` remounts when leaving Journey Maps; added `requestAnimationFrame(() => instance.fitView(...))` in `onInit` so every canvas mount triggers a zoom-to-fit.
+- **Type fix**: added `'status'` to `PresentationKeyframe.canvasView` union (pre-existing mismatch with the store's `canvasView` type).
+- **Resend spam note**: URL mismatch (supabase.co magic link URL vs custom sending domain) is a Supabase infrastructure limit — requires Supabase Pro custom domain to fully resolve. Check Outlook Junk as a workaround.
 
 ---
 
