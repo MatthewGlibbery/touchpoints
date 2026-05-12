@@ -58,8 +58,8 @@ User input → AI (Claude tool use) → Blueprint (typed data model)
 | Canvas | `@xyflow/react` v12 |
 | State | Zustand (`subscribeWithSelector`) |
 | Styling | CSS variables only (no Tailwind, no raw colors) |
-| AI | Anthropic SDK, `claude-sonnet-4-6`, tool use |
-| Persistence | LocalStorage, JSON serialisation |
+| AI | Claude `claude-sonnet-4-6` via Supabase Edge Functions; tool use for blueprint generation |
+| Persistence | Supabase Postgres (primary) + LocalStorage (offline cache/fallback) |
 | Voice | Web Speech API (browser-native) |
 | Icons | Lucide React |
 
@@ -111,6 +111,7 @@ type Blueprint   = { id, name, actors, phases, actions, touchpoints,
                      touchpointTags?,   // blueprint-wide touchpoint tag library
                      versions?,         // named content variants
                      activeVersionId?   // which version is active (null = base)
+                     baseVersionName?   // display label for the base version (default: 'Current')
                      presentations?,    // saved slideshows
                      overviewActionIds?,       // IDs of AI-selected representative actions
                      overviewCellDescriptions?, // Record<"${actorId}-${phaseId}", string> — AI descriptions per cell
@@ -257,7 +258,7 @@ A `useEffect([overviewMode])` calls `fitView({ padding: 0.15, duration: 600 })` 
 The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the view-change effect.
 
 ### Edges
-- **Auto-generated** horizontal edges (sequential actions, same actor+phase) and vertical edges (same phaseId+order, adjacent actors)
+- **Auto-generated** horizontal edges (sequential actions, same actor+phase), vertical edges (same phaseId+order, adjacent actors), and **cross-phase edges** (last action of phaseN → first action of phaseN+1, per actor; phases sorted by `phase.order`)
 - **Custom edges** (`customEdges[]`): user-drawn via drag from connection handle; stored on Blueprint
 - **Removed edges** (`removedEdgeIds[]`): auto-generated edges the user deleted; filtered out in `blueprintToFlow`
 - Edge meta (`edgeMeta` keyed by edge ID): `flowType` ('sequence' / 'dependency' / 'decision') + optional label; dependency = purple, decision = amber dashed
@@ -328,6 +329,9 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 | `multiSelectedNodeIds` | `string[]` | Action IDs currently selected via lasso (empty = no multi-select) |
 | `overviewMode` | `boolean` | Overview (semantic zoom) mode active — manual toggle only via ZoomToolbar |
 | `overviewGenerating` | `boolean` | AI overview generation in flight |
+| `selectedOverviewCell` | `{actorId,phaseId,actionId}\|null` | Selected cell in overview mode; drives OverviewInspector |
+| `compareSyncViewport` | `boolean` | Bidirectional pan/zoom sync active between SplitCanvas panels |
+| `inspectorRequestedTab` | `string\|null` | Tab to auto-select when NodeInspector opens (set by badge click) |
 | `storyboardMode` | `boolean` | Journey Map view active (replaces canvas) |
 | `storyboardGenerating` | `boolean` | Full storyboard generation or `regenerateAllFrames` in flight |
 | `storyboardGeneratingFrameId` | `string\|null` | Frame currently being image-generated; drives per-card spinner |
@@ -377,6 +381,12 @@ The store uses two factory-level closures (`vRead`, `vWrite`) so all content mut
 - `setActorDragOffset(offset)` — set by ActorLabelNode on mousemove during row drag
 - `setPhaseDragOffset(offset)` — set by PhaseHeaderNode on mousemove during phase drag
 - `setOverviewMode(on)` — toggles overview mode; when `on`, recomputes layout via `blueprintToFlow(buildOverviewBlueprint(bp), { overviewMode: true })`; when off, recomputes normal layout
+- `setSelectedOverviewCell(actorId, phaseId, actionId)` — set by ActionNode click in overview mode; drives OverviewInspector
+- `updateCellDescription(actorId, phaseId, description)` — saves AI-generated or user-edited description into `blueprint.overviewCellDescriptions`
+- `animateToNode(actionId)` — looks up rfNode position, computes center, calls `centerOnPoint` via viewportBridge; called on normal card click and inspector arrow navigation
+- `renameBaseVersion(name)` — sets `blueprint.baseVersionName`, saves; called from VersionBar 'Current' pill double-click
+- `openInspectorToTab(actionId, tab)` / `clearInspectorRequestedTab()` — badge-click routes NodeInspector to a specific tab (pains/opportunities/questions)
+- `setCompareSyncViewport(on)` — toggles bidirectional pan/zoom sync in SplitCanvas; stored as `compareSyncViewport`
 - `undo()` / `redo()` — pop from `undoStack`/`redoStack`; call `apply(prev/next)` to restore blueprint + recalculate layout; keyboard: Cmd+Z / Cmd+Shift+Z (or Ctrl+Y); blocked when cursor is in an input/textarea
 - `addStatus(label, color)` / `updateStatus(id, patch)` / `removeStatus(id)` — manage the `blueprint.statuses` vocabulary; `removeStatus` cascades: clears `statusTransition` references in all actions that pointed to that status; all three call `pushHistory`
 - `generateOverview()` — calls Claude API to select representative actions (`overviewActionIds`) and generate `labelAbstract` per action; then calls `setOverviewMode(true)`
@@ -432,9 +442,10 @@ Bootstraps from LocalStorage on module import.
 |---|---|---|
 | Top-left | ProjectBar | Blueprint name (editable inline, click to edit); project switcher chevron |
 | Top-left (below ProjectBar) | VersionBar | "Current" (editable, double-click) + named version pills, fork (+), delete (×), Compare button; positioned `top: 56, left: 16` |
-| Top-centre | ModeBar | Blueprint (active) / Personas / Journey Maps (stubs) / Present |
-| Top-right | ViewBar | View filter: Edit / Pains / Opportunities / Questions / Status |
-| Left | NodeInspector | Opens on action click; slides in from left |
+| Top-centre | ModeBar | Blueprints (Map icon) / Personas (Users icon, stub) / Journey Maps (Film icon → storyboardMode); no Present tab — Present is accessed via ViewBar dropdown |
+| Top-right | ViewBar | Dropdown (pill + chevron, styled like ProjectBar): Edit / Pains / Opportunities / Questions / Status + divider + Present; label shows 'Presenting' when in presentation context |
+| Left | NodeInspector | Opens on action click (normal mode); slides in from left; `App.tsx` renders `<OverviewInspector />` instead when `overviewMode && selectedOverviewCell` |
+| Left | OverviewInspector | Replaces NodeInspector in overview mode; opens on action card click; editable `labelAbstract` + AI cell description; TabBar: Steps / Pains / Opps / Questions (cell-aggregated) |
 | Left | ActorPanel | Opens on actor label click; slides in from left; mutually exclusive with NodeInspector |
 | Bottom-centre | EdgeInspector | Opens on edge click; slides up from bottom |
 | Bottom-centre | ZoomToolbar + MiniMap | Single pill `[− \| Details/Overview toggle \| +]`; center button toggles `overviewMode` (shows current mode label, highlighted blue when Overview active, spinner while generating); present mode: center shows fitView icon; ZoomToolbar inside ReactFlow at `bottom: 16` |
@@ -492,11 +503,13 @@ When `presentMode` is true:
 When `presentationEditMode` is true and `presentMode` is false:
 - Canvas remains fully interactive (pan, zoom, node interactions all active)
 - `SlidePanel` appears at bottom: presentation selector pills; keyframe strip with canvas thumbnails; "Add slide" / "Play" / close
-- `ModeBar` shown (for Blueprint / Present tab switching)
+- `ModeBar` shown (Blueprints tab exits all presentation modes; Journey Maps tab exits to storyboard view)
 - Overlays SplitCanvas when `compareMode` is also true (SlidePanel `z-index: 55` floats above SplitCanvas)
 
 ### Compare mode (SplitCanvas)
 When `compareMode` is true, `SplitCanvas` renders as the canvas layer (no longer an early return — App.tsx renders it as the canvas background, allowing other UI to overlay). It renders two side-by-side read-only ReactFlow instances, each computing its own nodes/edges via `blueprintToFlow(getBlueprintForVersion(...))` — not from the store's `rfNodes`/`rfEdges`. Version selectors in the top bar allow changing which two versions are shown. "Exit compare" button in top-right.
+
+A **Sync** toggle button in the SplitCanvas top bar enables bidirectional pan/zoom sync between the two panels (highlighted when active). Sync is implemented via a module-level bridge in `SplitCanvas.tsx` (`_rfA`/`_rfB` instances + `_syncing` flag); each panel's `onMove` broadcasts to the other when `compareSyncViewport` is true.
 
 When `compareMode && presentMode`: SplitCanvas is shown as canvas, PresentationControls floats above it; all other UI hidden.
 
@@ -524,6 +537,7 @@ Module-level singleton holding a `setter` and `getter` registered by `BlueprintC
 - `registerViewport(setter, getter)` — called in `BlueprintCanvas` `onInit`
 - `animateToViewport(vp, duration?)` — calls `instance.setViewport(vp, { duration })`
 - `captureViewport()` — calls `instance.getViewport()`
+- `centerOnPoint(x, y, opts?)` — calls `instance.setCenter(x, y, opts)`; used by `animateToNode` store action
 Decouples viewport control from React component hierarchy; works from any non-React context.
 
 ### VersionBar
@@ -541,18 +555,20 @@ Decouples viewport control from React component hierarchy; works from any non-Re
 - No theme toggle (moved to bottom-left)
 
 ### ModeBar
-- Blueprint tab: exits all presentation modes (`presentMode: false, presentationEditMode: false`)
-- Present tab: enters `presentationEditMode` (slide editor); highlighted when `presentMode || presentationEditMode`
-- Personas, Journey Maps: disabled stubs (not yet implemented)
+- Blueprints tab (Map icon): exits all canvas sub-modes (`storyboardMode: false, presentMode: false, presentationEditMode: false`)
+- Personas tab (Users icon): disabled stub
+- Journey Maps tab (Film icon): enters `storyboardMode`; highlighted when `storyboardMode` is true
+- Present is not a ModeBar tab; it is accessed from the ViewBar dropdown
 
 ### NodeInspector
 - Width: 420px; tabs: **Details**, **Pains**, **Opportunities**, **Questions**
-- **Header layout**: Row 1 `[← →][spacer][×]` — prev/next arrows top-left, close button top-right, same horizontal line; Row 2 `[actor icon][step name]`
+- **Header layout**: Row 1 `[← →][spacer][×]` — prev/next arrows top-left, close button top-right, same horizontal line; 12px padding gap; Row 2 `[actor icon][step name]`
 - Tab bar: not scrollable; divider scoped to content width (inside 18px horizontal padding), not full panel width
 - Details tab: step name field, description textarea, decision-point toggle, touchpoints section, media section
 - Media section: image/GIF items show 80px thumbnail (click → global lightbox via `setLightboxUrl`); video items show icon + URL
 - **Global lightbox**: rendered in `App.tsx` (not inside NodeInspector); full-viewport overlay (`z-index: 9999`), no border-radius on image
-- Delete button: full-width danger button at the bottom of the panel (below tab content), not in header; shows `ConfirmDeleteModal` before removing
+- Delete button: full-width danger button at the bottom of the panel; **only visible on the Details tab**; shows `ConfirmDeleteModal` before removing
+- Arrow navigation (`← →`) walks all actions sorted by `phase.order` then `action.order` — crosses phase boundaries; also calls `animateToNode` to center the canvas on the target card
 - Visible in `presentMode` when `inspectorOpen` is true (a keyframe may have set it)
 
 ### Pain/Opportunity/Question pills (NodeInspector)
@@ -590,7 +606,7 @@ Card div (`className="action-drag-handle"`) with:
 - **Connection handles**: 12px circles at N/E/S/W edges; `opacity: 0` at rest; proximity-revealed via JS: a `mousemove` listener on the ReactFlow node wrapper sets `data-handle-near="<side>"` when the cursor is within 18px of an edge midpoint, CSS reveals only that handle at `opacity: 0.75`; on direct handle `:hover` or during active drag (`.connectingfrom` / `.connectingto`): `opacity: 1` + size grows to **16×16px**. `pointer-events: all !important` ensures handles receive events regardless of card stacking. **Do not use `.connectionindicator`** — in ReactFlow v12 that class is set on all connectable handles at idle ("valid connection point"), not only during an active drag.
 - **Selected state**: driven by `selectedNodeId === action.id` read from the Zustand store — NOT from ReactFlow's `selected` node prop. This ensures the highlight follows programmatic navigation (inspector arrow buttons, keyboard nav) correctly and not just pointer-driven ReactFlow selection.
 
-**Overview mode card** (when `overviewMode: true`): explicit `height: OVERVIEW_CARD_HEIGHT (56px)`, `box-sizing: border-box`; shows actor icon box + `labelAbstract || label` (2-line clamp); no description, badges, or media; cursor is `pointer`; click opens NodeInspector; double-click and drag are disabled. The node height in the layout matches the card height exactly, so handles land at card borders.
+**Overview mode card** (when `overviewMode: true`): explicit `height: OVERVIEW_CARD_HEIGHT (56px)`, `box-sizing: border-box`; shows actor icon box + `labelAbstract || label` (2-line clamp); no description, badges, or media; cursor is `pointer`; click calls `setSelectedOverviewCell` → opens OverviewInspector; double-click enters inline edit mode for `labelAbstract` (saves via `updateAction`, Escape cancels); drag is disabled. The node height in the layout matches the card height exactly, so handles land at card borders.
 
 View highlighting (Pains/Opportunities/Questions mode): non-matching cards dim to 30% opacity; matching cards get colored border + glow + tinted background overlay.
 
@@ -638,6 +654,7 @@ app/src/
 │       ├── ConfirmDeleteModal.tsx  ← shared confirmation dialog for all delete actions
 │       ├── EdgeInspector.tsx
 │       ├── NodeInspector.tsx
+│       ├── OverviewInspector.tsx    ← cell click in overview mode; editable labelAbstract + AI description; 4-tab layout
 │       ├── ViewPanel.tsx
 │       ├── VersionBar.tsx         ← version tabs and compare trigger; top-left
 │       ├── SlidePanel.tsx         ← slide editor (keyframe strip + thumbnails)
@@ -656,8 +673,8 @@ app/src/
 
 | Trigger | Result |
 |---|---|
-| Click action card | Opens NodeInspector (in overview mode, also usable) |
-| Double-click action card | Inline label edit (Enter/blur saves, Escape cancels) — disabled in overview/present mode |
+| Click action card | Opens NodeInspector (normal mode) or OverviewInspector (overview mode); also calls `animateToNode` for smooth canvas centering |
+| Double-click action card | Inline label edit (Enter/blur saves, Escape cancels) — disabled in present mode; in overview mode, edits `labelAbstract` instead |
 | Drag action card | Snaps to nearest `(actorId, phaseId, order)` cell on release — disabled in overview/present mode |
 | Drag action card near column boundary | Card proximity activates column inserter; release inserts new substep column and places card there |
 | Left-drag on empty pane (no key) | Creates rubber-band lasso selection of action nodes; `onSelectionChange` updates `selectedActionNodes`; SelectionToolbar appears when 2+ selected |
@@ -672,6 +689,7 @@ app/src/
 | Click PhaseAdderNode | `addPhase('New Phase')` appended at end |
 | Click edge | Opens EdgeInspector |
 | Click image/GIF on action card | Opens global lightbox (`setLightboxUrl`) |
+| Click badge pill on action card | Calls `openInspectorToTab(action.id, tab)` → opens NodeInspector to Pains / Opportunities / Questions tab |
 | Draw new connection (drag from handle) | `onConnect` → `addCustomEdge` |
 | Drag existing edge endpoint | `onReconnect` → `removeEdge` + `addCustomEdge` |
 | Click empty cell | `addAction` at that cell |
@@ -713,7 +731,7 @@ app/src/
 | Click action card in guest view | Opens `NodeInspector` (read-only for owner fields; editable for own guest items) |
 | Click "Add pain/opp/question" in guest view | Calls `addGuest*` store action → in-memory update + `guest_comments` Supabase insert |
 
-All interaction handlers in ActionNode, PhaseHeaderNode, and ActorLabelNode are gated by `presentMode` — they are no-ops when presenting. `isGuestView` disables the same ReactFlow interaction props (`nodesDraggable`, `nodesConnectable`, `edgesReconnectable`, `selectionOnDrag`) and filters editing nodes from `displayNodes`.
+All interaction handlers in ActionNode, PhaseHeaderNode, and ActorLabelNode are gated by `presentMode` — they are no-ops when presenting. `isGuestView` disables the same ReactFlow interaction props (`nodesDraggable`, `nodesConnectable`, `edgesReconnectable`, `selectionOnDrag`) and filters editing nodes from `displayNodes`. In guest view: `ModeBar` and `ViewBar` remain visible; `ProjectBar`, `VersionBar`, `ActorPanel`, `EdgeInspector`, and all edit-mode canvas controls are hidden.
 
 ---
 
@@ -785,8 +803,7 @@ Template at `app/.env.example` (committed, no values).
 | `position: relative` wrapper on ActionNode | Handles at card edges intercept mousedown, hijacking node drag — reverted to fragment |
 | AI portrait generation | ActorPanel placeholder ready; image generation not yet wired |
 | Version edge data (edgeMeta/customEdges per version) | Edges are shared across versions; per-version edge customisation deferred |
-| Pan sync between SplitCanvas panels | Each panel pans independently; synced pan deferred |
-| Named version rename in VersionBar | Only create/delete supported for named versions; rename deferred (base blueprint IS renameable via "Current" pill or ProjectBar title) |
+| Named version rename in VersionBar | Only create/delete supported for named versions; rename deferred. Base version LABEL ('Current') is renameable via 'Current' pill (`renameBaseVersion`). Blueprint NAME is renameable via ProjectBar title (`renameBlueprint`). These are distinct. |
 | Divider between media and badge pills on action card | Removed — media flows directly into badge area with spacing only |
 | Fixed row heights (ROW_HEIGHT / ROW_HEIGHT_MEDIA as actuals) | Replaced by `estimateActionHeight`-based dynamic row heights that expand to fit content |
 | Inline transition style on nodes from layout.ts | CSS class rules in global.css are more reliable for ReactFlow wrapper transforms; inline used only to suppress (transition: none) on cursor-following nodes |
