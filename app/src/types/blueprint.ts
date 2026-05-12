@@ -5,6 +5,7 @@ export type Actor = {
   order: number;
   bio?: string;
   goals?: string;
+  portraitUrl?: string;
 };
 
 export type Phase = {

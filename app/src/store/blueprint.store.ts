@@ -130,6 +130,7 @@ type AppState = {
   createVersion: (name: string) => void;
   switchVersion: (versionId: string | null) => void;
   deleteVersion: (versionId: string) => void;
+  renameVersion: (versionId: string, name: string) => void;
 
   // UI
   setSelectedNode: (id: string | null) => void;
@@ -187,6 +188,8 @@ type AppState = {
   moveSubstep: (phaseId: string, fromOrder: number, direction: 'left' | 'right') => void;
   renameBlueprint: (name: string) => void;
   renameBaseVersion: (name: string) => void;
+  actorPortraitGenerating: string | null;
+  generateActorPortrait: (actorId: string) => Promise<void>;
 
   // Storyboard
   storyboardMode: boolean;
@@ -220,7 +223,7 @@ type AppState = {
 
 // Returns a blueprint filtered to only overview actions, with substep columns collapsed.
 // Empty phases (no overview actions) are filtered out. Orders are remapped to be contiguous.
-function buildOverviewBlueprint(bp: Blueprint): Blueprint {
+export function buildOverviewBlueprint(bp: Blueprint): Blueprint {
   if (!bp.overviewActionIds?.length) return bp;
   const ids = new Set(bp.overviewActionIds);
   const overviewActions = bp.actions.filter((a) => ids.has(a.id));
@@ -393,6 +396,7 @@ export const useBlueprintStore = create<AppState>()(
       storyboardGenerating: false,
       storyboardGeneratingFrameId: null,
       activeStoryboardId: null,
+      actorPortraitGenerating: null,
       undoStack: [],
       redoStack: [],
 
@@ -448,7 +452,18 @@ export const useBlueprintStore = create<AppState>()(
         };
         const { nodes, edges } = blueprintToFlow(bp);
         saveBlueprint(bp);
-        set({ blueprint: bp, rfNodes: nodes, rfEdges: edges, mode: 'canvas', activeVersionId: null });
+        set({
+          blueprint: bp, rfNodes: nodes, rfEdges: edges, mode: 'canvas', activeVersionId: null,
+          selectedNodeId: null, inspectorOpen: false,
+          selectedActorId: null, actorPanelOpen: false,
+          selectedPhaseId: null, phaseInspectorOpen: false,
+          selectedEdgeId: null, edgeInspectorOpen: false,
+          compareMode: false, presentMode: false, presentationEditMode: false,
+          activePresentationId: null, currentKeyframeIndex: 0,
+          overviewMode: false, selectedOverviewCell: null,
+          multiSelectedNodeIds: [], selectedColumnKey: null,
+          undoStack: [], redoStack: [],
+        });
       },
 
       setUser: (userId, userEmail) => {
@@ -1212,6 +1227,17 @@ export const useBlueprintStore = create<AppState>()(
         set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, activeVersionId: newActiveId, compareVersionIds: newCompareIds });
       },
 
+      renameVersion: (versionId, name) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        const newVersions = (blueprint.versions ?? []).map((v) => v.id === versionId ? { ...v, name: trimmed } : v);
+        const newBp = updatedAt({ ...blueprint, versions: newVersions });
+        saveBlueprint(newBp);
+        set({ blueprint: newBp });
+      },
+
       // ─── UI ────────────────────────────────────────────────────────────────
 
       setSelectedNode: (id) => set({ selectedNodeId: id, inspectorOpen: id !== null, inspectorRequestedTab: null, selectedActorId: null, actorPanelOpen: false, selectedPhaseId: null, phaseInspectorOpen: false }),
@@ -1945,6 +1971,32 @@ Return ONLY a JSON object in this exact format:
           }
         } finally {
           set({ storyboardGenerating: false, storyboardGeneratingFrameId: null });
+        }
+      },
+
+      generateActorPortrait: async (actorId) => {
+        const { blueprint, actorPortraitGenerating } = get();
+        if (!blueprint || actorPortraitGenerating) return;
+        const actor = blueprint.actors.find((a) => a.id === actorId);
+        if (!actor) return;
+
+        const parts = [`Professional portrait of ${actor.name}`];
+        if (actor.bio) parts.push(actor.bio.slice(0, 120));
+        parts.push('Photorealistic headshot, neutral background, professional lighting, clean composition.');
+        const prompt = parts.join('. ');
+
+        set({ actorPortraitGenerating: actorId });
+        try {
+          const url = await generateImage(prompt, blueprint.id, `actor-${actorId}`);
+          if (url) {
+            const { blueprint: bp2 } = get();
+            if (!bp2) return;
+            const newBp = updatedAt({ ...bp2, actors: bp2.actors.map((a) => a.id === actorId ? { ...a, portraitUrl: url } : a) });
+            saveBlueprint(newBp);
+            set({ blueprint: newBp });
+          }
+        } finally {
+          set({ actorPortraitGenerating: null });
         }
       },
     };

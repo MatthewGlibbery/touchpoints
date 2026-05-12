@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, User, Globe, Building2, Users, Activity, Camera, Trash2 } from 'lucide-react';
+import { X, User, Globe, Building2, Users, Activity, Camera, Trash2, Loader2, RefreshCw } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { Panel, IconButton, FieldBlock, inputStyle } from './primitives';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -13,6 +13,8 @@ export function ActorPanel() {
   const setSelectedActor = useBlueprintStore((s) => s.setSelectedActor);
   const updateActor = useBlueprintStore((s) => s.updateActor);
   const removeActor = useBlueprintStore((s) => s.removeActor);
+  const generateActorPortrait = useBlueprintStore((s) => s.generateActorPortrait);
+  const actorPortraitGenerating = useBlueprintStore((s) => s.actorPortraitGenerating);
 
   const actor = blueprint?.actors.find((a) => a.id === selectedActorId) ?? null;
 
@@ -82,35 +84,91 @@ export function ActorPanel() {
 
       <div style={{ overflowY: 'auto', flexGrow: 1, padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-        {/* AI Image placeholder */}
-        <div style={{
-          width: '100%',
-          height: 160,
-          borderRadius: 'var(--radius-md)',
-          background: 'var(--surface-bg-muted)',
-          border: '1px dashed var(--border-strong)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-          color: 'var(--text-muted)',
-        }}>
-          <div style={{
-            width: 48,
-            height: 48,
-            borderRadius: '50%',
-            background: `${actor.color}18`,
-            border: `1px solid ${actor.color}35`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            <Camera size={20} color={actor.color} />
+        {/* AI portrait */}
+        {actor.portraitUrl ? (
+          <div style={{ position: 'relative', width: '100%', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+            <img
+              src={actor.portraitUrl}
+              alt={`${actor.name} portrait`}
+              style={{ width: '100%', display: 'block', borderRadius: 'var(--radius-md)' }}
+            />
+            <button
+              onClick={() => generateActorPortrait(actor.id)}
+              disabled={actorPortraitGenerating === actor.id}
+              title="Regenerate portrait"
+              style={{
+                position: 'absolute',
+                bottom: 8,
+                right: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '4px 8px',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 'var(--radius-pill)',
+                background: 'rgba(0,0,0,0.55)',
+                color: '#fff',
+                border: 'none',
+                cursor: actorPortraitGenerating === actor.id ? 'default' : 'pointer',
+                backdropFilter: 'blur(4px)',
+              }}
+            >
+              {actorPortraitGenerating === actor.id
+                ? <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />
+                : <RefreshCw size={10} />}
+              {actorPortraitGenerating === actor.id ? 'Generating…' : 'Regenerate'}
+            </button>
           </div>
-          <span style={{ fontSize: 12, fontWeight: 500 }}>AI portrait</span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Coming soon</span>
-        </div>
+        ) : (
+          <button
+            onClick={() => generateActorPortrait(actor.id)}
+            disabled={actorPortraitGenerating === actor.id}
+            style={{
+              width: '100%',
+              height: 160,
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--surface-bg-muted)',
+              border: `1px dashed ${actorPortraitGenerating === actor.id ? actor.color : 'var(--border-strong)'}`,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              color: 'var(--text-muted)',
+              cursor: actorPortraitGenerating === actor.id ? 'default' : 'pointer',
+              transition: 'border-color 0.15s, background 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              if (actorPortraitGenerating !== actor.id)
+                (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-bg-hover)';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-bg-muted)';
+            }}
+          >
+            <div style={{
+              width: 48,
+              height: 48,
+              borderRadius: '50%',
+              background: `${actor.color}18`,
+              border: `1px solid ${actor.color}35`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              {actorPortraitGenerating === actor.id
+                ? <Loader2 size={20} color={actor.color} style={{ animation: 'spin 1s linear infinite' }} />
+                : <Camera size={20} color={actor.color} />}
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 500 }}>
+              {actorPortraitGenerating === actor.id ? 'Generating portrait…' : 'Generate AI portrait'}
+            </span>
+            {actorPortraitGenerating !== actor.id && (
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Click to generate</span>
+            )}
+          </button>
+        )}
 
         {/* Name */}
         <FieldBlock label="Name">

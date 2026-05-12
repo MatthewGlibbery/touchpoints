@@ -9,6 +9,7 @@ export function VersionBar() {
   const createVersion = useBlueprintStore((s) => s.createVersion);
   const switchVersion = useBlueprintStore((s) => s.switchVersion);
   const deleteVersion = useBlueprintStore((s) => s.deleteVersion);
+  const renameVersion = useBlueprintStore((s) => s.renameVersion);
   const toggleCompareMode = useBlueprintStore((s) => s.toggleCompareMode);
   const setCompareVersionIds = useBlueprintStore((s) => s.setCompareVersionIds);
   const renameBaseVersion = useBlueprintStore((s) => s.renameBaseVersion);
@@ -139,6 +140,7 @@ export function VersionBar() {
             active={activeVersionId === v.id}
             onActivate={() => switchVersion(v.id)}
             onDelete={() => deleteVersion(v.id)}
+            onRename={(name) => renameVersion(v.id, name)}
           />
         ))}
 
@@ -210,14 +212,59 @@ function VersionTab({
   active,
   onActivate,
   onDelete,
+  onRename,
 }: {
   label: string;
   active: boolean;
   onActivate: () => void;
   onDelete: () => void;
+  onRename: (name: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  const startEdit = () => {
+    setDraft(label);
+    setEditing(true);
+  };
+
+  const commitEdit = () => {
+    if (draft.trim()) onRename(draft.trim());
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commitEdit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commitEdit();
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        style={{
+          fontSize: 12,
+          color: 'var(--text-primary)',
+          background: 'var(--surface-bg-muted)',
+          border: '1px solid var(--accent-primary)',
+          borderRadius: 'var(--radius-pill)',
+          padding: '3px 8px',
+          outline: 'none',
+          width: 100,
+          fontFamily: 'inherit',
+        }}
+      />
+    );
+  }
 
   return (
     <>
@@ -235,6 +282,8 @@ function VersionTab({
       >
         <button
           onClick={onActivate}
+          onDoubleClick={(e) => { e.stopPropagation(); startEdit(); }}
+          title="Double-click to rename"
           style={{
             fontSize: 12,
             fontWeight: active ? 600 : 400,

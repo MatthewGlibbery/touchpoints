@@ -1,9 +1,10 @@
-import { X, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, RefreshCw, Loader2 } from 'lucide-react';
 import { ReactFlow, Background, BackgroundVariant } from '@xyflow/react';
 import type { ReactFlowInstance, Viewport } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { nodeTypes } from './nodeTypes';
-import { useBlueprintStore } from '../../store/blueprint.store';
+import { useBlueprintStore, buildOverviewBlueprint } from '../../store/blueprint.store';
 import { blueprintToFlow, getBlueprintForVersion } from '../../lib/layout';
 
 // ─── Module-level sync bridge ─────────────────────────────────────────────────
@@ -29,21 +30,55 @@ function syncToA(vp: Viewport) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function SplitCanvas() {
-  const blueprint            = useBlueprintStore((s) => s.blueprint);
-  const compareVersionIds    = useBlueprintStore((s) => s.compareVersionIds);
-  const theme                = useBlueprintStore((s) => s.theme);
-  const toggleCompareMode    = useBlueprintStore((s) => s.toggleCompareMode);
-  const setCompareVersionIds = useBlueprintStore((s) => s.setCompareVersionIds);
-  const compareSyncViewport  = useBlueprintStore((s) => s.compareSyncViewport);
+  const blueprint              = useBlueprintStore((s) => s.blueprint);
+  const compareVersionIds      = useBlueprintStore((s) => s.compareVersionIds);
+  const theme                  = useBlueprintStore((s) => s.theme);
+  const toggleCompareMode      = useBlueprintStore((s) => s.toggleCompareMode);
+  const setCompareVersionIds   = useBlueprintStore((s) => s.setCompareVersionIds);
+  const compareSyncViewport    = useBlueprintStore((s) => s.compareSyncViewport);
   const setCompareSyncViewport = useBlueprintStore((s) => s.setCompareSyncViewport);
+  const overviewGenerating     = useBlueprintStore((s) => s.overviewGenerating);
+  const generateOverview       = useBlueprintStore((s) => s.generateOverview);
+
+  const [overviewMode, setOverviewMode] = useState(false);
+  // Track generateOverview completion to auto-enable overview mode
+  const wasGenerating = useRef(false);
+  useEffect(() => {
+    if (wasGenerating.current && !overviewGenerating && blueprint?.overviewActionIds?.length) {
+      setOverviewMode(true);
+    }
+    wasGenerating.current = overviewGenerating;
+  }, [overviewGenerating, blueprint?.overviewActionIds?.length]);
+
+  // fitView both panels when overview mode changes
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      _rfA?.fitView({ padding: 0.15, duration: 500 });
+      _rfB?.fitView({ padding: 0.15, duration: 500 });
+    });
+  }, [overviewMode]);
+
+  const handleOverviewToggle = () => {
+    if (overviewGenerating) return;
+    if (overviewMode) {
+      setOverviewMode(false);
+    } else if (blueprint?.overviewActionIds?.length) {
+      setOverviewMode(true);
+    } else {
+      wasGenerating.current = true;
+      generateOverview();
+    }
+  };
 
   if (!blueprint) return null;
 
   const [idA, idB] = compareVersionIds;
   const bpA = getBlueprintForVersion(blueprint, idA);
   const bpB = getBlueprintForVersion(blueprint, idB);
-  const { nodes: nodesA, edges: edgesA } = blueprintToFlow(bpA);
-  const { nodes: nodesB, edges: edgesB } = blueprintToFlow(bpB);
+  const bpADisplay = overviewMode ? buildOverviewBlueprint(bpA) : bpA;
+  const bpBDisplay = overviewMode ? buildOverviewBlueprint(bpB) : bpB;
+  const { nodes: nodesA, edges: edgesA } = blueprintToFlow(bpADisplay, { overviewMode });
+  const { nodes: nodesB, edges: edgesB } = blueprintToFlow(bpBDisplay, { overviewMode });
 
   const versions = blueprint.versions ?? [];
   const baseLabel = blueprint.baseVersionName || 'Current';
@@ -102,6 +137,32 @@ export function SplitCanvas() {
           options={versionOptions}
           onChange={(id) => setCompareVersionIds([idA, id])}
         />
+
+        {/* Overview toggle */}
+        <button
+          onClick={handleOverviewToggle}
+          disabled={overviewGenerating}
+          title={overviewMode ? 'Switch to Details view' : 'Switch to Overview'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '4px 10px',
+            fontSize: 12,
+            fontWeight: 500,
+            color: overviewMode ? 'var(--accent-primary)' : 'var(--text-muted)',
+            background: overviewMode ? 'var(--accent-primary-soft)' : 'var(--surface-bg-muted)',
+            border: `1px solid ${overviewMode ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+            borderRadius: 'var(--radius-pill)',
+            cursor: overviewGenerating ? 'default' : 'pointer',
+            transition: 'all 0.15s',
+          }}
+        >
+          {overviewGenerating && <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />}
+          <span style={{ fontSize: 11, fontWeight: 600 }}>
+            {overviewGenerating ? 'Generating…' : overviewMode ? 'Overview' : 'Details'}
+          </span>
+        </button>
 
         {/* Sync toggle */}
         <button
