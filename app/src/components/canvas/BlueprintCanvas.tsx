@@ -299,7 +299,7 @@ export function BlueprintCanvas() {
           : n.style,
       };
     });
-  }, [nodes, presentMode, isGuestView, actorDragOffset, phaseDragOffset, draggingNodeId]);
+  }, [nodes, presentMode, overviewMode, isGuestView, actorDragOffset, phaseDragOffset, draggingNodeId]);
 
   const handleMultiDelete = useCallback(() => {
     selectedActionNodes.forEach((n) => removeAction(n.id.replace('action-', '')));

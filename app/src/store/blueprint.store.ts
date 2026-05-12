@@ -312,8 +312,14 @@ export const useBlueprintStore = create<AppState>()(
       };
     };
 
+    // Guard against concurrent completeBoot calls (can happen if both onAuthStateChange and
+    // getSession().then() fire in quick succession before userId is set in the store).
+    let _isBootstrapping = false;
+
     // Post-auth boot: load blueprints from cloud, then switch to canvas or onboarding
     const completeBoot = async () => {
+      if (_isBootstrapping) return;
+      _isBootstrapping = true;
       const all = await fetchBlueprintsFromCloud();
       const bps = Object.values(all).sort(
         (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -327,6 +333,7 @@ export const useBlueprintStore = create<AppState>()(
       } else {
         set({ mode: 'onboarding' });
       }
+      _isBootstrapping = false;
     };
 
     // Push current blueprint to undo stack before a mutation; clears redo stack
@@ -481,6 +488,7 @@ export const useBlueprintStore = create<AppState>()(
             await completeBoot();
           } catch (err) {
             console.error('[boot] setUser bootstrap failed:', err);
+            _isBootstrapping = false;
             set({ mode: 'onboarding' });
           }
         })();
@@ -2016,17 +2024,10 @@ if (_shareToken) {
   // Guest / view-only mode — skip auth gate entirely
   useBlueprintStore.getState().loadBlueprintByShareToken(_shareToken);
 } else {
-  // Normal auth flow
-  getSession().then((session) => {
-    if (session) {
-      useBlueprintStore.getState().setUser(session.user.id, session.user.email ?? '');
-    }
-    // else: stays in 'auth' mode until user signs in
-  });
-
-  // Keep auth state in sync (handles OTP verification + sign-out from other tabs)
+  // Keep auth state in sync (handles OTP magic-link verification, token refresh, sign-out)
+  // INITIAL_SESSION fires immediately for an existing session; SIGNED_IN fires on new sign-ins.
   onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_IN' && session) {
+    if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
       const { userId } = useBlueprintStore.getState();
       if (!userId) {
         useBlueprintStore.getState().setUser(session.user.id, session.user.email ?? '');
@@ -2034,6 +2035,14 @@ if (_shareToken) {
     } else if (event === 'SIGNED_OUT') {
       useBlueprintStore.setState({ mode: 'auth', userId: null, userEmail: null, blueprint: null,
         rfNodes: [], rfEdges: [], activeVersionId: null, storyboardMode: false });
+    }
+  });
+
+  // Fallback: if onAuthStateChange doesn't fire (e.g. older Supabase versions that don't
+  // emit INITIAL_SESSION), getSession() ensures we still bootstrap on page load.
+  getSession().then((session) => {
+    if (session && !useBlueprintStore.getState().userId) {
+      useBlueprintStore.getState().setUser(session.user.id, session.user.email ?? '');
     }
   });
 }
