@@ -42,7 +42,7 @@ export const ActionNode = memo(({ data }: NodeProps) => {
   const presentMode = useBlueprintStore((s) => s.presentMode);
   const overviewMode = useBlueprintStore((s) => s.overviewMode);
   const selectedNodeId = useBlueprintStore((s) => s.selectedNodeId);
-  const blueprintStatuses = useBlueprintStore((s) => s.blueprint?.statuses ?? []);
+  const blueprintStatuses = useBlueprintStore((s) => s.blueprint?.statuses) ?? [];
   const selected = selectedNodeId === action.id;
 
   const [editing, setEditing] = useState(false);
