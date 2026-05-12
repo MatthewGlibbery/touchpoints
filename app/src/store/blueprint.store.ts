@@ -458,8 +458,10 @@ export const useBlueprintStore = create<AppState>()(
           selectedActorId: null, actorPanelOpen: false,
           selectedPhaseId: null, phaseInspectorOpen: false,
           selectedEdgeId: null, edgeInspectorOpen: false,
-          compareMode: false, presentMode: false, presentationEditMode: false,
+          compareMode: false, compareVersionIds: [null, null] as [null, null],
+          presentMode: false, presentationEditMode: false,
           activePresentationId: null, currentKeyframeIndex: 0,
+          storyboardMode: false,
           overviewMode: false, selectedOverviewCell: null,
           multiSelectedNodeIds: [], selectedColumnKey: null,
           undoStack: [], redoStack: [],
@@ -470,12 +472,17 @@ export const useBlueprintStore = create<AppState>()(
         set({ userId, userEmail });
         // Async bootstrap: check for migration, then load from cloud
         (async () => {
-          const toMigrate = await migrateLocalBlueprints();
-          if (toMigrate.length > 0) {
-            set({ pendingMigration: toMigrate }); // stay in 'auth' — AuthScreen shows prompt
-            return;
+          try {
+            const toMigrate = await migrateLocalBlueprints();
+            if (toMigrate.length > 0) {
+              set({ pendingMigration: toMigrate }); // stay in 'auth' — AuthScreen shows prompt
+              return;
+            }
+            await completeBoot();
+          } catch (err) {
+            console.error('[boot] setUser bootstrap failed:', err);
+            set({ mode: 'onboarding' });
           }
-          await completeBoot();
         })();
       },
 
@@ -2026,7 +2033,7 @@ if (_shareToken) {
       }
     } else if (event === 'SIGNED_OUT') {
       useBlueprintStore.setState({ mode: 'auth', userId: null, userEmail: null, blueprint: null,
-        rfNodes: [], rfEdges: [], activeVersionId: null });
+        rfNodes: [], rfEdges: [], activeVersionId: null, storyboardMode: false });
     }
   });
 }

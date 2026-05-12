@@ -64,7 +64,7 @@ export default function App() {
   const inCanvas = mode === 'canvas';
 
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
+    <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: 'var(--canvas-bg)' }}>
 
       {/* ── Auth gate ── */}
       {mode === 'auth' && <AuthScreen />}
