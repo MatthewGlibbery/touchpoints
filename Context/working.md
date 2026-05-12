@@ -4,6 +4,17 @@
 
 All planned sessions (A through AJ) complete. App stable and deployed to Vercel. No active session.
 
+### Post-AJ: Production bug fix — React error #185 (two rounds)
+
+**Round 1** (prior commit): added `!userId` guard to `getSession().then()` + `INITIAL_SESSION` handling + `_isBootstrapping` boolean. Partially fixed but re-appeared.
+
+**Round 2** (current): replaced `_isBootstrapping` boolean with a **`_bootPromise` singleton** hoisted to module scope.
+- **Root cause (refined)**: `_isBootstrapping` reset to `false` after boot completed. If Supabase fired `SIGNED_OUT` mid-boot (resetting `userId` to null) then `SIGNED_IN` immediately after (e.g. token refresh), the `!userId` guard was bypassed and a second `completeBoot` ran after the first had already finished — two `setBlueprint` calls cascading into 25+ re-renders.
+- **Fix** (`blueprint.store.ts`):
+  - `_bootPromise: Promise<void> | null` at module scope — first call starts boot, all subsequent calls return same promise regardless of timing
+  - `signOut` action and `SIGNED_OUT` event handler both reset `_bootPromise = null` so next login boots fresh
+  - Error path in `completeBoot` also resets `_bootPromise = null` to allow retry
+
 ---
 
 ## What's Done

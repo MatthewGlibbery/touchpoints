@@ -276,6 +276,10 @@ function updatedAt(bp: Blueprint): Blueprint {
   return { ...bp, updatedAt: new Date().toISOString() };
 }
 
+// Singleton promise for the post-auth boot sequence. Hoisted to module scope so both
+// the store's signOut action and the module-level SIGNED_OUT handler can reset it.
+let _bootPromise: Promise<void> | null = null;
+
 export const useBlueprintStore = create<AppState>()(
   subscribeWithSelector((set, get) => {
 
@@ -312,28 +316,32 @@ export const useBlueprintStore = create<AppState>()(
       };
     };
 
-    // Guard against concurrent completeBoot calls (can happen if both onAuthStateChange and
-    // getSession().then() fire in quick succession before userId is set in the store).
-    let _isBootstrapping = false;
-
     // Post-auth boot: load blueprints from cloud, then switch to canvas or onboarding
-    const completeBoot = async () => {
-      if (_isBootstrapping) return;
-      _isBootstrapping = true;
-      const all = await fetchBlueprintsFromCloud();
-      const bps = Object.values(all).sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
-      if (bps.length > 0) {
-        // Prefer the last-used blueprint (CURRENT_KEY in localStorage)
-        const saved = loadBlueprint();
-        const bp = saved ?? bps[0];
-        get().setBlueprint(bp);
-        setTimeout(() => useBlueprintStore.getState().loadGuestComments(), 0);
-      } else {
-        set({ mode: 'onboarding' });
-      }
-      _isBootstrapping = false;
+    // Uses the module-level _bootPromise singleton — see declaration above create().
+    const completeBoot = (): Promise<void> => {
+      if (_bootPromise) return _bootPromise;
+      _bootPromise = (async () => {
+        try {
+          const all = await fetchBlueprintsFromCloud();
+          const bps = Object.values(all).sort(
+            (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+          );
+          if (bps.length > 0) {
+            // Prefer the last-used blueprint (CURRENT_KEY in localStorage)
+            const saved = loadBlueprint();
+            const bp = saved ?? bps[0];
+            get().setBlueprint(bp);
+            setTimeout(() => useBlueprintStore.getState().loadGuestComments(), 0);
+          } else {
+            set({ mode: 'onboarding' });
+          }
+        } catch (err) {
+          console.error('[boot] completeBoot failed:', err);
+          _bootPromise = null; // Allow retry after error
+          set({ mode: 'onboarding' });
+        }
+      })();
+      return _bootPromise;
     };
 
     // Push current blueprint to undo stack before a mutation; clears redo stack
@@ -488,7 +496,6 @@ export const useBlueprintStore = create<AppState>()(
             await completeBoot();
           } catch (err) {
             console.error('[boot] setUser bootstrap failed:', err);
-            _isBootstrapping = false;
             set({ mode: 'onboarding' });
           }
         })();
@@ -496,6 +503,7 @@ export const useBlueprintStore = create<AppState>()(
 
       signOut: async () => {
         await authSignOut();
+        _bootPromise = null; // Reset so next login boots fresh
         set({ mode: 'auth', userId: null, userEmail: null, pendingMigration: null, blueprint: null,
           rfNodes: [], rfEdges: [], activeVersionId: null });
       },
@@ -2033,6 +2041,7 @@ if (_shareToken) {
         useBlueprintStore.getState().setUser(session.user.id, session.user.email ?? '');
       }
     } else if (event === 'SIGNED_OUT') {
+      _bootPromise = null; // Cancel any in-flight boot so the next login boots fresh
       useBlueprintStore.setState({ mode: 'auth', userId: null, userEmail: null, blueprint: null,
         rfNodes: [], rfEdges: [], activeVersionId: null, storyboardMode: false });
     }
