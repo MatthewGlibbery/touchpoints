@@ -33,6 +33,7 @@ export function BlueprintCanvas() {
   const removeEdge = useBlueprintStore((s) => s.removeEdge);
   const theme = useBlueprintStore((s) => s.theme);
   const presentMode = useBlueprintStore((s) => s.presentMode);
+  const isGuestView = useBlueprintStore((s) => s.isGuestView);
   const canvasView = useBlueprintStore((s) => s.canvasView);
   const setCanvasView = useBlueprintStore((s) => s.setCanvasView);
   const actorDragOffset = useBlueprintStore((s) => s.actorDragOffset);
@@ -252,7 +253,7 @@ export function BlueprintCanvas() {
 
   const displayNodes = useMemo(() => {
     const EDITING = ['emptyCell', 'columnInserter', 'columnOverlay', 'phaseBoundary', 'phaseAdder', 'actorAdder'];
-    const base = (presentMode || overviewMode) ? nodes.filter((n) => !EDITING.includes(n.type ?? '')) : nodes;
+    const base = (presentMode || overviewMode || isGuestView) ? nodes.filter((n) => !EDITING.includes(n.type ?? '')) : nodes;
 
     if (!actorDragOffset && !phaseDragOffset && !draggingNodeId) return base;
 
@@ -296,7 +297,7 @@ export function BlueprintCanvas() {
           : n.style,
       };
     });
-  }, [nodes, presentMode, actorDragOffset, phaseDragOffset, draggingNodeId]);
+  }, [nodes, presentMode, isGuestView, actorDragOffset, phaseDragOffset, draggingNodeId]);
 
   const handleMultiDelete = useCallback(() => {
     selectedActionNodes.forEach((n) => removeAction(n.id.replace('action-', '')));
@@ -324,15 +325,15 @@ export function BlueprintCanvas() {
         connectionMode={ConnectionMode.Loose}
         connectionLineStyle={{ stroke: 'var(--accent-primary)', strokeWidth: 1.5 }}
         connectionLineType={ConnectionLineType.SmoothStep}
-        edgesReconnectable={!presentMode}
-        nodesDraggable={!presentMode && !overviewMode}
-        nodesConnectable={!presentMode}
+        edgesReconnectable={!presentMode && !isGuestView}
+        nodesDraggable={!presentMode && !overviewMode && !isGuestView}
+        nodesConnectable={!presentMode && !isGuestView}
         nodeDragThreshold={1}
         colorMode={theme === 'dark' ? 'dark' : 'light'}
         minZoom={0.2}
         maxZoom={2}
         panOnScroll
-        selectionOnDrag={!presentMode}
+        selectionOnDrag={!presentMode && !isGuestView}
         panOnDrag={[1, 2]}
         zoomOnDoubleClick={false}
         disableKeyboardA11y={true}

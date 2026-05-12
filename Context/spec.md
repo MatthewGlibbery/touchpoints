@@ -19,8 +19,9 @@ A structured, AI-assisted service blueprinting tool. Users provide raw input (tr
 ```
 'onboarding' → chat overlay over blurred canvas
 'canvas'     → full blueprint canvas + floating UI
+'auth'       → email OTP login screen
 ```
-Mode is stored in Zustand. App starts in `onboarding` unless a blueprint exists in LocalStorage, in which case it boots directly to `canvas`.
+Mode is stored in Zustand. App normally starts in `auth`; after login it loads the most recent blueprint or goes to `onboarding`. If the URL contains `?share=<token>`, auth is skipped — the blueprint is loaded via the `get-shared-blueprint` edge function and `isGuestView` is set to true.
 
 ### Canvas sub-modes (within 'canvas')
 ```
@@ -79,9 +80,9 @@ type Action      = { id, actorId, phaseId, label, labelDetailed?, labelAbstract?
                      touchpointLabels?   // per-action touchpoint tag selections
                    }
 type Touchpoint  = { id, label, type: 'interface' | 'system' | 'human' }
-type PainPoint   = { id, description, severity: 'low'|'medium'|'high', actionIds }
-type Opportunity = { id, description, actionIds, painPointIds, effort? }
-type Question    = { id, text, type?: 'technical'|'process', actionIds }
+type PainPoint   = { id, description, severity: 'low'|'medium'|'high', actionIds, aiGenerated?: true, guestContributed?: true, guestName?: string }
+type Opportunity = { id, description, actionIds, painPointIds, effort?, aiGenerated?: true, guestContributed?: true, guestName?: string }
+type Question    = { id, text, type?: 'technical'|'process', actionIds, aiGenerated?: true, guestContributed?: true, guestName?: string }
 type EdgeMeta    = { label?, flowType?: 'sequence'|'dependency'|'decision' }
 type CustomEdge  = { id, sourceActionId, targetActionId, sourceHandle?, targetHandle? }
 
@@ -110,7 +111,17 @@ type Blueprint   = { id, name, actors, phases, actions, touchpoints,
                      presentations?,    // saved slideshows
                      overviewActionIds?,       // IDs of AI-selected representative actions
                      overviewCellDescriptions?, // Record<"${actorId}-${phaseId}", string> — AI descriptions per cell
+                     storyboards?,      // Journey Map storyboards
                    }
+
+// Storyboard / Journey Map types
+type StoryboardStyleGuide = { baseStyle: string, characterDescriptions: Record<actorId, string> }
+type StoryboardFrame      = { id, order, sceneDescription, imagePrompt, imageUrl?, caption, phaseIds, actorIds }
+type Storyboard           = { id, name, styleGuide, frames, createdAt, updatedAt }
+
+// Style presets — stored INDEPENDENTLY of Blueprint in localStorage key 'touchpoints-style-presets'
+// Lives in app/src/lib/styleLibrary.ts; contains only baseStyle (not character descriptions)
+type StylePreset = { id, name, baseStyle, createdAt }
 ```
 
 ### Version scope
@@ -267,7 +278,8 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 - Tool: `create_blueprint` — Claude calls this with structured JSON matching the Blueprint schema
 - Actor/phase name matching: actions reference actors and phases by name in the raw response; `normalizeBlueprintResponse()` resolves to IDs
 - **Prompt constraint:** at most one action per actor per phase; AI instructed to pick the most representative step if multiple exist
-- Questions are extracted alongside pain points and opportunities
+- Actions carry `painPoints`, `opportunities`, and `questions` arrays (strings matching the top-level items by description/text); `normalizeBlueprintResponse` resolves these to IDs and back-fills `actionIds` on each item
+- All AI-generated pain points, opportunities, and questions have `aiGenerated: true`; this flag is stripped from the data object by `updatePainPoint`/`updateOpportunity`/`updateQuestion` on any edit
 - No streaming of the tool call JSON; status message shown while waiting
 
 ---
@@ -297,6 +309,13 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 | `activeVersionId` | `string\|null` | Active version; null = base content |
 | `compareMode` | `boolean` | Side-by-side SplitCanvas active |
 | `compareVersionIds` | `[string\|null, string\|null]` | Which two versions to compare |
+| `isGuestView` | `boolean` | True when viewing via share link — hides all edit UI, disables interactions |
+| `guestCanComment` | `boolean` | Whether this share token allows adding pains/opps/questions |
+| `guestName` | `string\|null` | Name entered in GuestNamePrompt; stored in sessionStorage |
+| `guestSessionId` | `string` | Unique session ID for this guest visit; stored in sessionStorage |
+| `guestShareId` | `string\|null` | UUID of the `blueprint_shares` row (for writing `guest_comments`) |
+| `guestBlueprintRowId` | `string\|null` | UUID of the `blueprints` row (for FK in `guest_comments`) |
+| `shareToken` | `string\|null` | The share token from the URL (set when `isGuestView`) |
 | `presentMode` | `boolean` | Read-only presentation/playback mode |
 | `presentationEditMode` | `boolean` | Slide editor mode; mutually exclusive with `presentMode` |
 | `activePresentationId` | `string\|null` | Which presentation is being edited/played |
@@ -305,6 +324,10 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 | `multiSelectedNodeIds` | `string[]` | Action IDs currently selected via lasso (empty = no multi-select) |
 | `overviewMode` | `boolean` | Overview (semantic zoom) mode active — manual toggle only via ZoomToolbar |
 | `overviewGenerating` | `boolean` | AI overview generation in flight |
+| `storyboardMode` | `boolean` | Journey Map view active (replaces canvas) |
+| `storyboardGenerating` | `boolean` | Full storyboard generation or `regenerateAllFrames` in flight |
+| `storyboardGeneratingFrameId` | `string\|null` | Frame currently being image-generated; drives per-card spinner |
+| `activeStoryboardId` | `string\|null` | Which storyboard is selected |
 
 NodeInspector and ActorPanel are **mutually exclusive**: opening one always closes the other.
 
@@ -349,6 +372,19 @@ The store uses two factory-level closures (`vRead`, `vWrite`) so all content mut
 - `setPhaseDragOffset(offset)` — set by PhaseHeaderNode on mousemove during phase drag
 - `setOverviewMode(on)` — toggles overview mode; when `on`, recomputes layout via `blueprintToFlow(buildOverviewBlueprint(bp), { overviewMode: true })`; when off, recomputes normal layout
 - `generateOverview()` — calls Claude API to select representative actions (`overviewActionIds`) and generate `labelAbstract` per action; then calls `setOverviewMode(true)`
+- `setStoryboardMode(on)` — enters/exits Journey Map view; exits present/compare/overview modes
+- `createStoryboard(name)`, `deleteStoryboard(id)`, `setActiveStoryboard(id)`
+- `updateStoryboardFrame(storyboardId, frameId, patch)` — partial update to a single frame
+- `updateStoryboardStyleGuide(storyboardId, guide)` — saves new style guide AND rebuilds every frame's `imagePrompt` via `buildImagePrompt(frame, guide, actors)`
+- `addBlankStoryboardFrame(storyboardId)`, `deleteStoryboardFrame(storyboardId, frameId)`
+- `reorderStoryboardFrames(storyboardId, fromIdx, toIdx)`
+- `loadBlueprintByShareToken(token)` — calls `get-shared-blueprint` edge function; sets `isGuestView`, `guestCanComment`, `guestShareId`, `guestBlueprintRowId`; loads guest comments via `loadGuestComments` on next tick
+- `setGuestName(name)` — persists name to `sessionStorage`
+- `addGuestPainPoint/Opportunity/Question(actionId, ...)` — adds item to in-memory blueprint with `guestContributed: true` + writes to `guest_comments` Supabase table
+- `loadGuestComments()` — owner-only: fetches all `guest_comments` for this blueprint via FK embed and merges into in-memory blueprint; called automatically on boot and `switchToBlueprint`
+- `generateStoryboard()` — full pipeline: generate style guide (Claude) → frame structure (Claude) → image prompts → images (DALL-E 3) sequentially
+- `regenerateFrame(storyboardId, frameId)` — regenerates image for a single frame using stored `imagePrompt`
+- `regenerateAllFrames(storyboardId)` — regenerates images for all frames sequentially; uses `storyboardGenerating` + `storyboardGeneratingFrameId` for progress tracking
 
 `removeAction` cascades: removes orphaned pain points / opportunities / questions (those with no other actionIds), removes custom edges involving that action (from base), and closes the inspector if it was open.
 
@@ -398,6 +434,21 @@ Bootstraps from LocalStorage on module import.
 | Bottom-centre | PresentationControls | Shown when `presentMode`; `bottom: 72`, `z-index: 60` |
 | Bottom-left | Theme toggle | Sun/moon icon button; `position: fixed, bottom: 16, left: 16` in App.tsx; always visible; `border-strong`, `shadow-md` for canvas contrast |
 | Bottom-left | DesignSystemModal toggle | Palette icon (dev tool); offset right of theme toggle at `left: 54` |
+
+### Journey Map view (`storyboardMode`)
+Full-screen replacement for the canvas when `storyboardMode: true`. Rendered as `<JourneyMapView />` in `App.tsx`; canvas and all floating canvas UI are hidden.
+
+- **Top bar**: back arrow → blueprint, blueprint name, Present button (frames exist), Export all (images exist), journey map selector dropdown, Style Guide button, Generate button (spinner + frame progress while generating)
+- **Filmstrip**: horizontally scrollable row of `240×(9:16)` frame cards; selected has blue border; drag-to-reorder (HTML drag); "+" add frame at end
+- **Frame detail panel** (below filmstrip): image preview (click → lightbox), editable caption, read-only scene description, editable image prompt, actor + phase pills; Regenerate / Download / Delete buttons
+- **Style Guide modal**: editable base style + per-actor character descriptions + live prompt preview
+  - **Presets strip**: saved `StylePreset` pills below base style; click applies `baseStyle`; "Save as preset" inline input; × to delete; highlighted when active
+  - **Footer**: Cancel | Save &amp; Regenerate All (only shown when frames exist + `VITE_OPENAI_API_KEY` set) | Save
+  - "Save" rebuilds all frame `imagePrompt` strings from new guide (sync, no image calls); "Save &amp; Regenerate All" also triggers `regenerateAllFrames` after closing
+- **JourneyMapPresenter**: full-screen overlay; keyboard ← / → / Esc nav; per-frame image + caption; frame counter + close button
+
+### Style preset library
+`StylePreset` entries are stored in localStorage key `touchpoints-style-presets` independently of any Blueprint. Presets carry only `baseStyle` (not character descriptions, which are actor-specific). CRUD via `app/src/lib/styleLibrary.ts` (`loadPresets`, `savePreset`, `deletePreset`). The Style Guide modal reads/writes presets directly — no store involvement.
 
 ### Confirmation modal (`ConfirmDeleteModal`)
 All destructive delete actions show a `ConfirmDeleteModal` before executing. Applies to: deleting a step (NodeInspector), deleting an actor (ActorPanel), deleting a named version (VersionBar), deleting a presentation (SlidePanel), and deleting an individual slide (SlidePanel keyframe strip). The modal renders at `z-index: 9000` with a Trash2 icon, title, description, Cancel, and Delete buttons.
@@ -484,6 +535,7 @@ Decouples viewport control from React component hierarchy; works from any non-Re
 - **Effort picker** (opportunities): all selected states use green (`#22C55E`) regardless of level
 - **Type picker** (questions): all selected states use amber (`#F59E0B`) regardless of type
 - **Item X button**: `position: absolute; top: 8px; right: 8px` on each item card; circular `IconButton` (size 22); matches panel-close button pattern
+- **AI badge**: items with `aiGenerated: true` show a small purple Sparkles + "AI" pill inline with the severity/effort/type picker row; the badge disappears as soon as any field is edited (store clears the flag on any update)
 
 ### Primitives (`app/src/ui/primitives.tsx`)
 Shared: `Panel`, `IconButton`, `FieldBlock`, `Tag`, `TabBar`, `inputStyle` — all token-based, dark/light auto. `IconButton` accepts an optional `style` prop for positioning overrides.
@@ -528,10 +580,15 @@ app/src/
 ├── lib/
 │   ├── ai.ts
 │   ├── layout.ts
-│   ├── storage.ts
+│   ├── storage.ts                 ← includes getShareToken, createShareToken, deleteShareToken
 │   ├── viewportBridge.ts      ← module-level viewport setter/getter for presentation
+│   ├── storyboard.ts          ← generateStyleGuide, generateFrameStructure, buildImagePrompt, generateImage
+│   ├── styleLibrary.ts        ← StylePreset CRUD; localStorage key 'touchpoints-style-presets'
 │   └── sample.ts              ← "Renew a Driving Licence" demo blueprint
 ├── components/
+│   ├── auth/
+│   │   ├── AuthScreen.tsx
+│   │   └── GuestNamePrompt.tsx    ← "What should we call you?" modal; shown to guests with canComment
 │   ├── onboarding/
 │   │   └── OnboardingOverlay.tsx
 │   ├── canvas/
@@ -549,6 +606,8 @@ app/src/
 │   │       ├── PhaseAdderNode.tsx ← "Add Phase" button at end of phase header row
 │   │       ├── PhaseHeaderNode.tsx
 │   │       └── SwimlaneNode.tsx
+│   ├── storyboard/
+│   │   └── StoryboardView.tsx     ← JourneyMapView, FrameCard, FrameDetail, StyleGuideModal, JourneyMapPresenter
 │   └── ui/
 │       ├── ActorPanel.tsx
 │       ├── ConfirmDeleteModal.tsx  ← shared confirmation dialog for all delete actions
@@ -620,19 +679,52 @@ app/src/
 | "Exit" in PresentationControls | Returns to `presentationEditMode` (slide editor) |
 | Any delete action (step/actor/version/presentation/slide) | Shows `ConfirmDeleteModal` before executing |
 
-All interaction handlers in ActionNode, PhaseHeaderNode, and ActorLabelNode are gated by `presentMode` — they are no-ops when presenting.
+| Click "Share" in ProjectBar | Opens share dropdown; loads existing token from Supabase; shows generate/copy/revoke controls |
+| Click "Generate share link" | Creates `blueprint_shares` row; displays shareable URL |
+| Click "Copy link" | Copies `${origin}?share=<token>` to clipboard; brief "Copied!" confirmation |
+| Click "×" in share dropdown | Revokes link by deleting `blueprint_shares` row |
+| Open `?share=<token>` URL | Loads blueprint via `get-shared-blueprint` edge function; skips auth; `isGuestView: true` |
+| First visit in guest view (canComment) | `GuestNamePrompt` modal — enter name or Skip |
+| Click action card in guest view | Opens `NodeInspector` (read-only for owner fields; editable for own guest items) |
+| Click "Add pain/opp/question" in guest view | Calls `addGuest*` store action → in-memory update + `guest_comments` Supabase insert |
+
+All interaction handlers in ActionNode, PhaseHeaderNode, and ActorLabelNode are gated by `presentMode` — they are no-ops when presenting. `isGuestView` disables the same ReactFlow interaction props (`nodesDraggable`, `nodesConnectable`, `edgesReconnectable`, `selectionOnDrag`) and filters editing nodes from `displayNodes`.
 
 ---
 
-## 12. Environment
+## 12. Edge Functions
+
+| Function | Auth required | Purpose |
+|---|---|---|
+| `ai-generate` | JWT | Anthropic proxy for `generateBlueprint` |
+| `ai-overview` | JWT | Anthropic proxy for overview + cell description generation |
+| `ai-storyboard` | JWT | Anthropic + DALL-E proxy; uploads images to Supabase Storage |
+| `get-shared-blueprint` | None | Validates share token → returns `{ blueprint, canComment, shareId, blueprintRowId }` |
+
+`get-shared-blueprint` uses the service role key internally. It checks `blueprint_shares.expires_at` and returns 410 if expired.
+
+---
+
+## 13. Environment
 
 ```
-VITE_ANTHROPIC_API_KEY=sk-ant-...
-VITE_OPENAI_API_KEY=sk-proj-...   # optional — only needed for Journey Map image generation
+VITE_SUPABASE_URL=https://...supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...
 ```
 Stored in `app/.env.local` (gitignored via `*.local` in `app/.gitignore`).
 
+`ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are Supabase Edge Function secrets (set via `supabase secrets set`), not client env vars.
+
 Template at `app/.env.example` (committed, no values).
+
+### Supabase dashboard requirements
+- **Authentication → Email Templates**: Both "Magic Link" and "Confirm Signup" templates must include `{{ .Token }}` to surface the 6-digit OTP code
+- **Authentication → URL Configuration**: Site URL and Redirect URLs must include the deployed app URL (and `http://localhost:5173` for local dev)
+- **Authentication → SMTP**: Custom SMTP provider required to avoid Supabase free-tier rate limit (2 emails/hour per project). Resend (`smtp.resend.com:465`, username `resend`) recommended.
+- **Edge Functions deployed**: `ai-generate`, `ai-overview`, `ai-storyboard`, `get-shared-blueprint`
+
+### Share link token generation
+`blueprint_shares.token` is generated **client-side** in `storage.ts` (`generateToken()` — `crypto.getRandomValues` → URL-safe base64) and passed explicitly on insert. The DB column has no default. The Supabase PostgreSQL version does not support `encode(..., 'base64url')`.
 
 ### Repository
 - GitHub: `https://github.com/MatthewGlibbery/touchpoints` (public)
@@ -640,7 +732,7 @@ Template at `app/.env.example` (committed, no values).
 
 ---
 
-## 13. Non-Goals / Rejected Approaches
+## 14. Non-Goals / Rejected Approaches
 
 | Rejected | Reason |
 |---|---|
@@ -679,3 +771,4 @@ Template at `app/.env.example` (committed, no values).
 | Separate "Generating overview…" floating badge | Removed — generating state is now shown inline in the ZoomToolbar center button (spinner + "Generating…" label) |
 | ReactFlow `selected` prop for ActionNode highlight | Replaced by store-derived `selectedNodeId === action.id`; ReactFlow's prop only updates on pointer interaction and lags behind programmatic navigation |
 | Arrow key node movement (ReactFlow default) | Disabled via `disableKeyboardA11y={true}` on `<ReactFlow>`; cards are grid-constrained and should never be nudged by keyboard |
+| DB-generated share tokens via `encode(gen_random_bytes(24), 'base64url')` | Supabase's PostgreSQL does not support the `base64url` encoding — token generated client-side via `crypto.getRandomValues` and passed explicitly on insert |

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, User, Globe, Building2, Users, Activity, Sparkles, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
-import Anthropic from '@anthropic-ai/sdk';
+import { supabase } from '../../lib/supabase';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { Panel, IconButton, FieldBlock, TabBar, inputStyle } from './primitives';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -87,11 +87,6 @@ export function PhaseInspector() {
     if (!blueprint) return;
     setGenerating(true);
     try {
-      const client = new Anthropic({
-        apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
-        dangerouslyAllowBrowser: true,
-      });
-
       const actorNames = [...new Set(
         phaseActions.map((a) => blueprint.actors.find((ac) => ac.id === a.actorId)?.name ?? 'Unknown')
       )].join(', ');
@@ -104,17 +99,22 @@ ${stepLabels || '(no steps yet)'}
 
 Write a concise 1-2 sentence description of what this phase of the service journey involves and why it matters. Be specific to the context above. Return only the description text, no preamble.`;
 
-      const response = await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 256,
-        messages: [{ role: 'user', content: prompt }],
+      const { data, error } = await supabase.functions.invoke('ai-overview', {
+        body: {
+          model: 'claude-sonnet-4-6',
+          max_tokens: 256,
+          messages: [{ role: 'user', content: prompt }],
+        },
       });
 
-      const text = response.content.find((b) => b.type === 'text');
-      if (text && text.type === 'text') {
-        const desc = text.text.trim();
-        setDescDraft(desc);
-        updatePhase(phase.id, { description: desc });
+      if (!error && data) {
+        const content = (data as { content: Array<{ type: string; text?: string }> }).content;
+        const text = content.find((b) => b.type === 'text');
+        if (text?.text) {
+          const desc = text.text.trim();
+          setDescDraft(desc);
+          updatePhase(phase.id, { description: desc });
+        }
       }
     } catch (_) {
       // silently fail — user can type manually

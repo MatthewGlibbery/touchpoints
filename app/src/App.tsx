@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useCallback } from 'react';
+import { useLayoutEffect, useCallback } from 'react';
 import { useBlueprintStore } from './store/blueprint.store';
+import { AuthScreen } from './components/auth/AuthScreen';
 import { OnboardingOverlay } from './components/onboarding/OnboardingOverlay';
 import { BlueprintCanvas } from './components/canvas/BlueprintCanvas';
 import { SplitCanvas } from './components/canvas/SplitCanvas';
@@ -17,6 +18,7 @@ import { SlidePanel } from './components/ui/SlidePanel';
 import { PresentationControls } from './components/ui/PresentationControls';
 import { OverviewInspector } from './components/ui/OverviewInspector';
 import { Sun, Moon } from 'lucide-react';
+import { GuestNamePrompt } from './components/auth/GuestNamePrompt';
 
 export default function App() {
   const mode                 = useBlueprintStore((s) => s.mode);
@@ -31,6 +33,9 @@ export default function App() {
   const toggleTheme          = useBlueprintStore((s) => s.toggleTheme);
   const lightboxUrl          = useBlueprintStore((s) => s.lightboxUrl);
   const setLightboxUrl       = useBlueprintStore((s) => s.setLightboxUrl);
+  const isGuestView          = useBlueprintStore((s) => s.isGuestView);
+  const guestCanComment      = useBlueprintStore((s) => s.guestCanComment);
+  const guestName            = useBlueprintStore((s) => s.guestName);
 
   const closeLightbox = useCallback(() => setLightboxUrl(null), [setLightboxUrl]);
 
@@ -45,6 +50,9 @@ export default function App() {
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
 
+      {/* ── Auth gate ── */}
+      {mode === 'auth' && <AuthScreen />}
+
       {/* ── Full-screen canvas layer ── */}
       {inCanvas && storyboardMode
         ? <JourneyMapView />
@@ -53,10 +61,13 @@ export default function App() {
 
       {mode === 'onboarding' && <OnboardingOverlay />}
 
+      {/* ── Guest name prompt (shown once if can comment and no name yet) ── */}
+      {isGuestView && guestCanComment && !guestName && <GuestNamePrompt />}
+
       {inCanvas && !storyboardMode && (
         <>
-          {/* ── Standard edit UI — hidden in present and compare modes ── */}
-          {!presentMode && !compareMode && (
+          {/* ── Standard edit UI — hidden in present, compare, and guest modes ── */}
+          {!presentMode && !compareMode && !isGuestView && (
             <>
               <ProjectBar />
               <ModeBar />
@@ -68,6 +79,9 @@ export default function App() {
               <EdgeInspector />
             </>
           )}
+
+          {/* ── Guest view: read-only inspector (if open) ── */}
+          {isGuestView && inspectorOpen && <NodeInspector />}
 
           {/* ── Compare mode (not presenting) — overlay extras only, no ModeBar ── */}
           {compareMode && !presentMode && (

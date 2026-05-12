@@ -2,9 +2,12 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   ArrowLeft, Sparkles, Settings2, RefreshCw, Trash2, Plus,
   ChevronDown, Loader2, ImageOff, Film, Download, Play, X, ChevronLeft, ChevronRight,
+  BookMarked,
 } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { buildImagePrompt } from '../../lib/storyboard';
+import { loadPresets, savePreset, deletePreset } from '../../lib/styleLibrary';
+import type { StylePreset } from '../../lib/styleLibrary';
 import type { StoryboardStyleGuide, StoryboardFrame } from '../../types/blueprint';
 
 // ─── Download helper ──────────────────────────────────────────────────────────
@@ -227,7 +230,9 @@ export function JourneyMapView() {
   const deleteStoryboardFrame   = useBlueprintStore((s) => s.deleteStoryboardFrame);
   const regenerateFrame         = useBlueprintStore((s) => s.regenerateFrame);
   const reorderStoryboardFrames = useBlueprintStore((s) => s.reorderStoryboardFrames);
+  const regenerateAllFrames     = useBlueprintStore((s) => s.regenerateAllFrames);
   const setLightboxUrl          = useBlueprintStore((s) => s.setLightboxUrl);
+  const isGuestView             = useBlueprintStore((s) => s.isGuestView);
 
   const activeStoryboard = storyboards.find((s) => s.id === activeStoryboardId) ?? storyboards[0] ?? null;
   const frames = activeStoryboard?.frames ?? [];
@@ -248,8 +253,6 @@ export function JourneyMapView() {
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const filmstripRef = useRef<HTMLDivElement>(null);
-  const hasOpenAiKey = !!import.meta.env.VITE_OPENAI_API_KEY;
-
   // Auto-select first frame when frames load
   useEffect(() => {
     if (frames.length && !frames.find((f) => f.id === selectedFrameId)) {
@@ -378,7 +381,7 @@ export function JourneyMapView() {
           )}
 
           {/* Export all */}
-          {framesWithImages > 0 && (
+          {framesWithImages > 0 && !isGuestView && (
             <button
               onClick={handleExportAll}
               disabled={exportingAll}
@@ -432,7 +435,7 @@ export function JourneyMapView() {
           </div>
 
           {/* Style guide button */}
-          {activeStoryboard && (
+          {activeStoryboard && !isGuestView && (
             <button
               onClick={() => setShowStyleGuide(true)}
               style={{
@@ -448,10 +451,9 @@ export function JourneyMapView() {
           )}
 
           {/* Generate button */}
-          <button
+          {!isGuestView && <button
             onClick={handleGenerate}
             disabled={storyboardGenerating}
-            title={!hasOpenAiKey ? 'Add VITE_OPENAI_API_KEY to app/.env.local for images' : undefined}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '7px 14px', borderRadius: 'var(--radius-sm)',
@@ -471,12 +473,12 @@ export function JourneyMapView() {
                 Generate
               </>
             )}
-          </button>
+          </button>}
         </div>
 
         {/* ── Main content ── */}
         {frames.length === 0 && !storyboardGenerating ? (
-          <EmptyState onGenerate={handleGenerate} hasOpenAiKey={hasOpenAiKey} />
+          <EmptyState onGenerate={handleGenerate} />
         ) : (
           <div style={{
             flex: 1,
@@ -530,7 +532,6 @@ export function JourneyMapView() {
                 actors={blueprint.actors}
                 phases={blueprint.phases}
                 isGenerating={selectedFrame.id === storyboardGeneratingFrameId}
-                hasOpenAiKey={hasOpenAiKey}
                 onCaptionChange={(text) =>
                   updateStoryboardFrame(activeStoryboard.id, selectedFrame.id, { caption: text })
                 }
@@ -557,6 +558,7 @@ export function JourneyMapView() {
             actors={blueprint.actors}
             frames={activeStoryboard.frames}
             onUpdate={(guide) => updateStoryboardStyleGuide(activeStoryboard.id, guide)}
+            onRegenerateAll={() => regenerateAllFrames(activeStoryboard.id)}
             onClose={() => setShowStyleGuide(false)}
           />
         )}
@@ -766,8 +768,8 @@ function AddFrameCard({ storyboardId }: { storyboardId: string }) {
 // ─── Frame detail panel ───────────────────────────────────────────────────────
 
 function FrameDetail({
-  frame, storyboardId, actors, phases,
-  isGenerating, hasOpenAiKey,
+  frame, storyboardId: _storyboardId, actors, phases,
+  isGenerating,
   onCaptionChange, onPromptChange, onRegenerate, onDelete, onImageClick,
 }: {
   frame: StoryboardFrame;
@@ -775,7 +777,6 @@ function FrameDetail({
   actors: import('../../types/blueprint').Actor[];
   phases: import('../../types/blueprint').Phase[];
   isGenerating: boolean;
-  hasOpenAiKey: boolean;
   onCaptionChange: (text: string) => void;
   onPromptChange: (text: string) => void;
   onRegenerate: () => void;
@@ -860,11 +861,6 @@ function FrameDetail({
               gap: 8, color: 'var(--text-muted)',
             }}>
               <ImageOff size={22} />
-              {!hasOpenAiKey && !imgBroken && (
-                <span style={{ fontSize: 11, textAlign: 'center', maxWidth: 200, lineHeight: 1.4 }}>
-                  Add VITE_OPENAI_API_KEY to enable image generation
-                </span>
-              )}
             </div>
           )}
         </div>
@@ -873,15 +869,14 @@ function FrameDetail({
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={onRegenerate}
-            disabled={isGenerating || !hasOpenAiKey}
-            title={!hasOpenAiKey ? 'Add VITE_OPENAI_API_KEY to app/.env.local' : undefined}
+            disabled={isGenerating}
             style={{
               flex: 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               padding: '6px 10px', borderRadius: 'var(--radius-sm)',
               border: '1px solid var(--border-subtle)', background: 'transparent',
-              color: isGenerating || !hasOpenAiKey ? 'var(--text-muted)' : 'var(--text-secondary)',
-              cursor: isGenerating || !hasOpenAiKey ? 'not-allowed' : 'pointer',
+              color: isGenerating ? 'var(--text-muted)' : 'var(--text-secondary)',
+              cursor: isGenerating ? 'not-allowed' : 'pointer',
               fontSize: 12,
             }}
           >
@@ -1158,7 +1153,7 @@ function SbDropdown({
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
-function EmptyState({ onGenerate, hasOpenAiKey }: { onGenerate: () => void; hasOpenAiKey: boolean }) {
+function EmptyState({ onGenerate }: { onGenerate: () => void }) {
   return (
     <div style={{
       flex: 1,
@@ -1177,7 +1172,7 @@ function EmptyState({ onGenerate, hasOpenAiKey }: { onGenerate: () => void; hasO
         </p>
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, maxWidth: 320 }}>
           Generate a journey map from your blueprint. Claude will create scenes and captions;
-          {hasOpenAiKey ? ' DALL-E 3 will illustrate each frame.' : ' add VITE_OPENAI_API_KEY to app/.env.local for AI illustrations.'}
+          {' DALL-E 3 will illustrate each frame.'}
         </p>
       </div>
       <button
@@ -1199,16 +1194,21 @@ function EmptyState({ onGenerate, hasOpenAiKey }: { onGenerate: () => void; hasO
 // ─── Style guide modal ────────────────────────────────────────────────────────
 
 function StyleGuideModal({
-  storyboard, actors, frames, onUpdate, onClose,
+  storyboard, actors, frames, onUpdate, onRegenerateAll, onClose,
 }: {
   storyboard: import('../../types/blueprint').Storyboard;
   actors: import('../../types/blueprint').Actor[];
   frames: StoryboardFrame[];
   onUpdate: (guide: StoryboardStyleGuide) => void;
+  onRegenerateAll: () => void;
   onClose: () => void;
 }) {
   const [guide, setGuide] = useState<StoryboardStyleGuide>({ ...storyboard.styleGuide });
   const [previewFrameIdx, setPreviewFrameIdx] = useState(0);
+  const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets());
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const presetInputRef = useRef<HTMLInputElement>(null);
 
   const updateChar = (actorId: string, text: string) => {
     setGuide((g) => ({
@@ -1220,6 +1220,30 @@ function StyleGuideModal({
   const handleSave = () => {
     onUpdate(guide);
     onClose();
+  };
+
+  const handleSaveAndRegenerate = () => {
+    onUpdate(guide);
+    onClose();
+    onRegenerateAll();
+  };
+
+  const handleSavePreset = () => {
+    const name = presetName.trim();
+    if (!name) return;
+    const preset = savePreset(name, guide.baseStyle);
+    setPresets((prev) => [...prev, preset]);
+    setPresetName('');
+    setSavingPreset(false);
+  };
+
+  const handleDeletePreset = (id: string) => {
+    deletePreset(id);
+    setPresets((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const handleApplyPreset = (preset: StylePreset) => {
+    setGuide((g) => ({ ...g, baseStyle: preset.baseStyle }));
   };
 
   const previewFrame = frames[previewFrameIdx];
@@ -1242,7 +1266,7 @@ function StyleGuideModal({
           background: 'var(--surface-bg)',
           borderRadius: 'var(--radius-lg)',
           boxShadow: 'var(--shadow-md)',
-          width: 560,
+          width: 580,
           maxWidth: 'calc(100vw - 48px)',
           maxHeight: '85vh',
           display: 'flex',
@@ -1261,7 +1285,7 @@ function StyleGuideModal({
               Style Guide
             </h3>
             <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-              Defines the visual style and character descriptions used for image generation
+              Visual style and character descriptions used for image generation
             </p>
           </div>
           <button
@@ -1271,21 +1295,77 @@ function StyleGuideModal({
               color: 'var(--text-muted)', padding: 4, borderRadius: 4,
             }}
           >
-            ✕
+            <X size={16} />
           </button>
         </div>
 
         {/* Content */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* Base style */}
+
+          {/* Base style + presets */}
           <div>
-            <label style={{
-              fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
-              letterSpacing: '0.06em', textTransform: 'uppercase',
-              display: 'block', marginBottom: 6,
-            }}>
-              Base Style
-            </label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <label style={{
+                fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+              }}>
+                Base Style
+              </label>
+              {!savingPreset ? (
+                <button
+                  onClick={() => { setSavingPreset(true); setTimeout(() => presetInputRef.current?.focus(), 0); }}
+                  title="Save current base style as a reusable preset"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    fontSize: 11, padding: '3px 8px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-subtle)', background: 'transparent',
+                    color: 'var(--text-muted)', cursor: 'pointer',
+                  }}
+                >
+                  <BookMarked size={11} />
+                  Save as preset
+                </button>
+              ) : (
+                <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                  <input
+                    ref={presetInputRef}
+                    value={presetName}
+                    onChange={(e) => setPresetName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSavePreset();
+                      if (e.key === 'Escape') { setSavingPreset(false); setPresetName(''); }
+                    }}
+                    placeholder="Preset name…"
+                    style={{
+                      fontSize: 12, padding: '3px 7px', width: 140,
+                      borderRadius: 4, border: '1px solid var(--border-subtle)',
+                      background: 'var(--surface-bg)', color: 'var(--text-primary)', outline: 'none',
+                    }}
+                  />
+                  <button
+                    onClick={handleSavePreset}
+                    style={{
+                      fontSize: 11, padding: '3px 8px', borderRadius: 4,
+                      border: 'none', background: 'var(--accent-primary)', color: '#fff', cursor: 'pointer',
+                    }}
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => { setSavingPreset(false); setPresetName(''); }}
+                    style={{
+                      fontSize: 11, padding: '3px 6px', borderRadius: 4,
+                      border: '1px solid var(--border-subtle)', background: 'transparent',
+                      color: 'var(--text-muted)', cursor: 'pointer',
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+
             <textarea
               value={guide.baseStyle}
               onChange={(e) => setGuide((g) => ({ ...g, baseStyle: e.target.value }))}
@@ -1299,6 +1379,54 @@ function StyleGuideModal({
                 fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
               }}
             />
+
+            {/* Saved presets */}
+            {presets.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <BookMarked size={10} />
+                  Saved presets — click to apply
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {presets.map((preset) => (
+                    <div
+                      key={preset.id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 0,
+                        borderRadius: 'var(--radius-pill)',
+                        border: `1px solid ${preset.baseStyle === guide.baseStyle ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+                        background: preset.baseStyle === guide.baseStyle ? 'var(--accent-primary-soft)' : 'var(--surface-bg-muted)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <button
+                        onClick={() => handleApplyPreset(preset)}
+                        title={preset.baseStyle}
+                        style={{
+                          fontSize: 12, padding: '4px 10px',
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          color: preset.baseStyle === guide.baseStyle ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                          fontWeight: preset.baseStyle === guide.baseStyle ? 600 : 400,
+                        }}
+                      >
+                        {preset.name}
+                      </button>
+                      <button
+                        onClick={() => handleDeletePreset(preset.id)}
+                        title="Delete preset"
+                        style={{
+                          padding: '4px 7px 4px 2px',
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          color: 'var(--text-muted)', display: 'flex', alignItems: 'center',
+                        }}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Character descriptions */}
@@ -1383,7 +1511,7 @@ function StyleGuideModal({
                 }}
               />
               <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-                This is the assembled DALL-E prompt — live preview of base style + scene + character descriptions.
+                Live preview of how this style guide assembles into a DALL-E prompt.
               </p>
             </div>
           )}
@@ -1393,7 +1521,7 @@ function StyleGuideModal({
         <div style={{
           padding: '12px 20px',
           borderTop: '1px solid var(--border-subtle)',
-          display: 'flex', justifyContent: 'flex-end', gap: 8,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
         }}>
           <button
             onClick={onClose}
@@ -1405,16 +1533,33 @@ function StyleGuideModal({
           >
             Cancel
           </button>
-          <button
-            onClick={handleSave}
-            style={{
-              padding: '7px 14px', borderRadius: 'var(--radius-sm)',
-              border: 'none', background: 'var(--accent-primary)',
-              color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-            }}
-          >
-            Save
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {frames.length > 0 && (
+              <button
+                onClick={handleSaveAndRegenerate}
+                title="Save style guide, rebuild all prompts, and regenerate all images"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '7px 14px', borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-subtle)', background: 'transparent',
+                  color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13,
+                }}
+              >
+                <RefreshCw size={13} />
+                Save &amp; Regenerate All
+              </button>
+            )}
+            <button
+              onClick={handleSave}
+              style={{
+                padding: '7px 14px', borderRadius: 'var(--radius-sm)',
+                border: 'none', background: 'var(--accent-primary)',
+                color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              }}
+            >
+              Save
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -44,6 +44,9 @@ export type Question = {
   text: string;
   type?: 'technical' | 'process';
   actionIds: string[];
+  aiGenerated?: true;
+  guestContributed?: true;
+  guestName?: string;
 };
 
 export type Touchpoint = {
@@ -57,6 +60,9 @@ export type PainPoint = {
   description: string;
   severity: 'low' | 'medium' | 'high';
   actionIds: string[];
+  aiGenerated?: true;
+  guestContributed?: true;
+  guestName?: string;
 };
 
 export type Opportunity = {
@@ -65,6 +71,9 @@ export type Opportunity = {
   effort?: 'low' | 'medium' | 'high' | 'unsure';
   actionIds: string[];
   painPointIds: string[];
+  aiGenerated?: true;
+  guestContributed?: true;
+  guestName?: string;
 };
 
 export type EdgeMeta = {

@@ -1,10 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { supabase } from './supabase';
 import type { Blueprint, Actor, StoryboardStyleGuide, StoryboardFrame } from '../types/blueprint';
-
-const client = new Anthropic({
-  apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
-  dangerouslyAllowBrowser: true,
-});
 
 // ─── Style guide generation ───────────────────────────────────────────────────
 
@@ -17,28 +12,31 @@ export async function generateStyleGuide(
     .map((a) => `- ${a.name}${a.bio ? `: ${a.bio}` : ''}${a.goals ? ` (goals: ${a.goals})` : ''}`)
     .join('\n');
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2048,
-    system: `You are a character designer for an anime storyboard. Given a list of actors from a service blueprint, create vivid, specific visual character descriptions that will produce consistent illustrations when used in image generation prompts.
+  const { data, error } = await supabase.functions.invoke('ai-storyboard', {
+    body: {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      system: `You are a character designer for an anime storyboard. Given a list of actors from a service blueprint, create vivid, specific visual character descriptions that will produce consistent illustrations when used in image generation prompts.
 
 Each description must be 1–2 sentences covering: approximate age, gender, hair (color + style), skin tone, key clothing/outfit, distinctive features, and typical expression/body language. Write in a style optimized for image generation prompts (descriptive phrases, not sentences).
 
 Style context: ${baseStyle}`,
-    tools: [characterDescTool],
-    tool_choice: { type: 'any' },
-    messages: [
-      {
-        role: 'user',
-        content: `Create character descriptions for these actors:\n${actorList}\n\nService: ${blueprint.name}`,
-      },
-    ],
+      tools: [characterDescTool],
+      tool_choice: { type: 'any' },
+      messages: [
+        {
+          role: 'user',
+          content: `Create character descriptions for these actors:\n${actorList}\n\nService: ${blueprint.name}`,
+        },
+      ],
+    },
   });
 
-  const toolUse = response.content.find((b) => b.type === 'tool_use');
-  if (!toolUse || toolUse.type !== 'tool_use') {
-    return { baseStyle, characterDescriptions: {} };
-  }
+  if (error || !data) return { baseStyle, characterDescriptions: {} };
+
+  const content = (data as { content: Array<{ type: string; input?: unknown }> }).content;
+  const toolUse = content.find((b) => b.type === 'tool_use');
+  if (!toolUse) return { baseStyle, characterDescriptions: {} };
 
   const raw = toolUse.input as { characters: Array<{ actorName: string; description: string }> };
   const characterDescriptions: Record<string, string> = {};
@@ -77,10 +75,11 @@ export async function generateFrameStructure(
     .map((a) => `${a.name}: ${styleGuide.characterDescriptions[a.id] ?? 'no description'}`)
     .join('\n');
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
-    system: `You are a storyboard director for an anime-style visual narrative. Given a service blueprint, create storyboard frames that tell the story of the service journey in a compelling, cinematic way.
+  const { data, error } = await supabase.functions.invoke('ai-storyboard', {
+    body: {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      system: `You are a storyboard director for an anime-style visual narrative. Given a service blueprint, create storyboard frames that tell the story of the service journey in a compelling, cinematic way.
 
 Each frame should:
 - Capture a key dramatic or emotional moment in the journey
@@ -89,18 +88,22 @@ Each frame should:
 - Include a vivid scene description that will work well as an image prompt
 
 Create one frame per phase (combine minor phases if needed). Frames should flow as a coherent visual story.`,
-    tools: [frameStructureTool],
-    tool_choice: { type: 'any' },
-    messages: [
-      {
-        role: 'user',
-        content: `Service: ${blueprint.name}\n\nPhases and actions:\n${phasesSummary}\n\nCharacters:\n${characterList}\n\nCreate storyboard frames for this journey.`,
-      },
-    ],
+      tools: [frameStructureTool],
+      tool_choice: { type: 'any' },
+      messages: [
+        {
+          role: 'user',
+          content: `Service: ${blueprint.name}\n\nPhases and actions:\n${phasesSummary}\n\nCharacters:\n${characterList}\n\nCreate storyboard frames for this journey.`,
+        },
+      ],
+    },
   });
 
-  const toolUse = response.content.find((b) => b.type === 'tool_use');
-  if (!toolUse || toolUse.type !== 'tool_use') return [];
+  if (error || !data) return [];
+
+  const content = (data as { content: Array<{ type: string; input?: unknown }> }).content;
+  const toolUse = content.find((b) => b.type === 'tool_use');
+  if (!toolUse) return [];
 
   const raw = toolUse.input as {
     frames: Array<{
@@ -148,42 +151,28 @@ export function buildImagePrompt(
   return parts.join(', ');
 }
 
-// ─── Image generation (DALL-E 3) ─────────────────────────────────────────────
+// ─── Image generation (DALL-E 3 via Edge Function → Supabase Storage) ────────
 
-export async function generateImage(prompt: string): Promise<string | null> {
-  const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-  if (!apiKey) return null;
-
-  const response = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'dall-e-3',
-      prompt,
-      n: 1,
-      size: '1792x1024',
-      quality: 'standard',
-      response_format: 'b64_json',
-    }),
+export async function generateImage(
+  prompt: string,
+  blueprintId: string,
+  frameId: string
+): Promise<string | null> {
+  const { data, error } = await supabase.functions.invoke('ai-storyboard', {
+    body: { type: 'image', prompt, blueprintId, frameId },
   });
 
-  if (!response.ok) {
-    const err = await response.text();
-    console.error('DALL-E error:', err);
+  if (error) {
+    console.error('Image generation failed:', error);
     return null;
   }
 
-  const data = await response.json() as { data: Array<{ b64_json: string }> };
-  const b64 = data.data[0]?.b64_json;
-  return b64 ? `data:image/png;base64,${b64}` : null;
+  return (data as { url: string | null }).url ?? null;
 }
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
-const characterDescTool: Anthropic.Tool = {
+const characterDescTool = {
   name: 'create_character_descriptions',
   description: 'Create visual character descriptions for storyboard consistency',
   input_schema: {
@@ -208,7 +197,7 @@ const characterDescTool: Anthropic.Tool = {
   },
 };
 
-const frameStructureTool: Anthropic.Tool = {
+const frameStructureTool = {
   name: 'create_storyboard_frames',
   description: 'Create storyboard frames for a service journey',
   input_schema: {

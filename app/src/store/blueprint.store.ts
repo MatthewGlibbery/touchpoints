@@ -4,11 +4,12 @@ import type { Node, Edge } from '@xyflow/react';
 import type { Blueprint, BlueprintVersion, Action, Actor, Phase, PainPoint, Opportunity, Question, EdgeMeta, CustomEdge, Presentation, PresentationKeyframe, Storyboard, StoryboardFrame, StoryboardStyleGuide } from '../types/blueprint';
 import { generateStyleGuide, generateFrameStructure, buildImagePrompt, generateImage } from '../lib/storyboard';
 import { blueprintToFlow, computeColumnData, getBlueprintForVersion, ACTION_NODE_WIDTH, estimateActionHeight } from '../lib/layout';
-import { saveBlueprint, loadBlueprint, loadAllBlueprints, switchBlueprint } from '../lib/storage';
+import { saveBlueprint, loadBlueprint, loadAllBlueprints, switchBlueprint, fetchBlueprintsFromCloud, migrateLocalBlueprints, importBlueprintsToCloud } from '../lib/storage';
 import { centerOnPoint } from '../lib/viewportBridge';
-import Anthropic from '@anthropic-ai/sdk';
+import { getSession, onAuthStateChange, signOut as authSignOut } from '../lib/auth';
+import { supabase } from '../lib/supabase';
 
-type AppMode = 'onboarding' | 'canvas';
+type AppMode = 'onboarding' | 'canvas' | 'auth';
 type CanvasView = 'edit' | 'pain-points' | 'opportunities' | 'questions';
 
 type DragTarget = { actorId: string; phaseId: string; order: number };
@@ -26,6 +27,17 @@ type ContentData = {
 type AppState = {
   mode: AppMode;
   canvasView: CanvasView;
+  userId: string | null;
+  userEmail: string | null;
+  pendingMigration: Blueprint[] | null;
+  // Guest / share view
+  isGuestView: boolean;
+  guestCanComment: boolean;
+  guestName: string | null;
+  guestSessionId: string;
+  guestShareId: string | null;
+  guestBlueprintRowId: string | null;
+  shareToken: string | null;
   blueprint: Blueprint | null;
   rfNodes: Node[];
   rfEdges: Edge[];
@@ -55,10 +67,22 @@ type AppState = {
   // Navigation
   setMode: (mode: AppMode) => void;
   setCanvasView: (view: CanvasView) => void;
+  setUser: (id: string, email: string) => void;
+  signOut: () => Promise<void>;
+  confirmMigration: () => Promise<void>;
+  skipMigration: () => Promise<void>;
   setBlueprint: (blueprint: Blueprint) => void;
   loadAllBlueprints: () => Record<string, Blueprint>;
   switchToBlueprint: (id: string) => void;
   startFromScratch: () => void;
+
+  // Guest / share
+  loadBlueprintByShareToken: (token: string) => Promise<void>;
+  setGuestName: (name: string | null) => void;
+  addGuestPainPoint: (actionId: string, description: string, severity: PainPoint['severity']) => Promise<void>;
+  addGuestOpportunity: (actionId: string, description: string) => Promise<void>;
+  addGuestQuestion: (actionId: string, text: string) => Promise<void>;
+  loadGuestComments: () => Promise<void>;
 
   // Actions
   updateAction: (id: string, patch: Partial<Action>) => void;
@@ -179,6 +203,7 @@ type AppState = {
   deleteStoryboardFrame: (storyboardId: string, frameId: string) => void;
   generateStoryboard: () => Promise<void>;
   regenerateFrame: (storyboardId: string, frameId: string) => Promise<void>;
+  regenerateAllFrames: (storyboardId: string) => Promise<void>;
   reorderStoryboardFrames: (storyboardId: string, fromIdx: number, toIdx: number) => void;
 };
 
@@ -273,6 +298,23 @@ export const useBlueprintStore = create<AppState>()(
       };
     };
 
+    // Post-auth boot: load blueprints from cloud, then switch to canvas or onboarding
+    const completeBoot = async () => {
+      const all = await fetchBlueprintsFromCloud();
+      const bps = Object.values(all).sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+      if (bps.length > 0) {
+        // Prefer the last-used blueprint (CURRENT_KEY in localStorage)
+        const saved = loadBlueprint();
+        const bp = saved ?? bps[0];
+        get().setBlueprint(bp);
+        setTimeout(() => useBlueprintStore.getState().loadGuestComments(), 0);
+      } else {
+        set({ mode: 'onboarding' });
+      }
+    };
+
     // Compute layout using active version's data and save
     const apply = (bp: Blueprint) => {
       const { activeVersionId, overviewMode } = get();
@@ -284,8 +326,18 @@ export const useBlueprintStore = create<AppState>()(
     };
 
     return {
-      mode: 'onboarding',
+      mode: 'auth',
       canvasView: 'edit',
+      userId: null,
+      userEmail: null,
+      pendingMigration: null,
+      isGuestView: false,
+      guestCanComment: false,
+      guestName: null,
+      guestSessionId: '',
+      guestShareId: null,
+      guestBlueprintRowId: null,
+      shareToken: null,
       blueprint: null,
       rfNodes: [],
       rfEdges: [],
@@ -361,6 +413,222 @@ export const useBlueprintStore = create<AppState>()(
         set({ blueprint: bp, rfNodes: nodes, rfEdges: edges, mode: 'canvas', activeVersionId: null });
       },
 
+      setUser: (userId, userEmail) => {
+        set({ userId, userEmail });
+        // Async bootstrap: check for migration, then load from cloud
+        (async () => {
+          const toMigrate = await migrateLocalBlueprints();
+          if (toMigrate.length > 0) {
+            set({ pendingMigration: toMigrate }); // stay in 'auth' — AuthScreen shows prompt
+            return;
+          }
+          await completeBoot();
+        })();
+      },
+
+      signOut: async () => {
+        await authSignOut();
+        set({ mode: 'auth', userId: null, userEmail: null, pendingMigration: null, blueprint: null,
+          rfNodes: [], rfEdges: [], activeVersionId: null });
+      },
+
+      confirmMigration: async () => {
+        const { pendingMigration } = get();
+        if (pendingMigration && pendingMigration.length > 0) {
+          await importBlueprintsToCloud(pendingMigration);
+        }
+        set({ pendingMigration: null });
+        await completeBoot();
+      },
+
+      skipMigration: async () => {
+        set({ pendingMigration: null });
+        await completeBoot();
+      },
+
+      loadBlueprintByShareToken: async (token) => {
+        try {
+          const { data, error } = await supabase.functions.invoke('get-shared-blueprint', {
+            body: { token },
+          });
+          if (error || !data?.blueprint) return;
+          const bp = data.blueprint as Blueprint;
+          const { nodes, edges } = blueprintToFlow(bp);
+          const sessionId = sessionStorage.getItem('guest-session-id') ||
+            `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          sessionStorage.setItem('guest-session-id', sessionId);
+          const storedName = sessionStorage.getItem('guest-name') || null;
+          set({
+            blueprint: bp, rfNodes: nodes, rfEdges: edges, mode: 'canvas',
+            isGuestView: true, shareToken: token,
+            guestCanComment: data.canComment ?? true,
+            guestShareId: data.shareId ?? null,
+            guestBlueprintRowId: data.blueprintRowId ?? null,
+            guestSessionId: sessionId, guestName: storedName,
+            activeVersionId: bp.activeVersionId ?? null,
+          });
+          // Load any previously submitted guest comments for this session
+          setTimeout(() => useBlueprintStore.getState().loadGuestComments(), 0);
+        } catch {
+          // Stay in auth mode on failure
+        }
+      },
+
+      setGuestName: (name) => {
+        if (name) sessionStorage.setItem('guest-name', name);
+        else sessionStorage.removeItem('guest-name');
+        set({ guestName: name });
+      },
+
+      addGuestPainPoint: async (actionId, description, severity) => {
+        const { blueprint, guestShareId, guestBlueprintRowId, guestSessionId, guestName, activeVersionId } = get();
+        if (!blueprint) return;
+        const id = `guest-pp-${Date.now()}`;
+        const pp: PainPoint = { id, description, severity, actionIds: [actionId], guestContributed: true, guestName: guestName ?? undefined };
+        const newBp = {
+          ...blueprint,
+          painPoints: [...blueprint.painPoints, pp],
+          actions: blueprint.actions.map((a) =>
+            a.id === actionId ? { ...a, painPointIds: [...a.painPointIds, id] } : a
+          ),
+        };
+        const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
+        const { nodes, edges } = blueprintToFlow(effectiveBp);
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges });
+        if (guestShareId && guestBlueprintRowId) {
+          try {
+            await supabase.from('guest_comments').insert({
+              share_id: guestShareId, blueprint_id: guestBlueprintRowId,
+              type: 'pain', data: pp, guest_name: guestName, guest_session: guestSessionId,
+            });
+          } catch {}
+        }
+      },
+
+      addGuestOpportunity: async (actionId, description) => {
+        const { blueprint, guestShareId, guestBlueprintRowId, guestSessionId, guestName, activeVersionId } = get();
+        if (!blueprint) return;
+        const id = `guest-opp-${Date.now()}`;
+        const opp: Opportunity = { id, description, actionIds: [actionId], painPointIds: [], guestContributed: true, guestName: guestName ?? undefined };
+        const newBp = {
+          ...blueprint,
+          opportunities: [...blueprint.opportunities, opp],
+          actions: blueprint.actions.map((a) =>
+            a.id === actionId ? { ...a, opportunityIds: [...a.opportunityIds, id] } : a
+          ),
+        };
+        const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
+        const { nodes, edges } = blueprintToFlow(effectiveBp);
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges });
+        if (guestShareId && guestBlueprintRowId) {
+          try {
+            await supabase.from('guest_comments').insert({
+              share_id: guestShareId, blueprint_id: guestBlueprintRowId,
+              type: 'opportunity', data: opp, guest_name: guestName, guest_session: guestSessionId,
+            });
+          } catch {}
+        }
+      },
+
+      addGuestQuestion: async (actionId, text) => {
+        const { blueprint, guestShareId, guestBlueprintRowId, guestSessionId, guestName, activeVersionId } = get();
+        if (!blueprint) return;
+        const id = `guest-q-${Date.now()}`;
+        const q: Question = { id, text, actionIds: [actionId], guestContributed: true, guestName: guestName ?? undefined };
+        const newBp = {
+          ...blueprint,
+          questions: [...(blueprint.questions ?? []), q],
+          actions: blueprint.actions.map((a) =>
+            a.id === actionId ? { ...a, questionIds: [...(a.questionIds ?? []), id] } : a
+          ),
+        };
+        const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
+        const { nodes, edges } = blueprintToFlow(effectiveBp);
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges });
+        if (guestShareId && guestBlueprintRowId) {
+          try {
+            await supabase.from('guest_comments').insert({
+              share_id: guestShareId, blueprint_id: guestBlueprintRowId,
+              type: 'question', data: q, guest_name: guestName, guest_session: guestSessionId,
+            });
+          } catch {}
+        }
+      },
+
+      loadGuestComments: async () => {
+        const { blueprint, isGuestView, activeVersionId } = get();
+        if (!blueprint) return;
+
+        if (isGuestView) {
+          // In guest view: load only this session's comments (anon insert only; can't SELECT normally)
+          // Comments from this session are already in-memory; just re-merge from sessionStorage if needed.
+          return;
+        }
+
+        // Owner: load all guest comments for this blueprint via foreign key join
+        try {
+          const { data } = await supabase
+            .from('blueprints')
+            .select('id, guest_comments!blueprint_id(type, data, guest_name, guest_session)')
+            .eq('data->>id', blueprint.id)
+            .maybeSingle();
+
+          if (!data?.guest_comments?.length) return;
+
+          type GuestRow = { type: 'pain' | 'opportunity' | 'question'; data: PainPoint | Opportunity | Question; guest_name: string | null; guest_session: string };
+          const rows = data.guest_comments as GuestRow[];
+
+          let newBp = { ...blueprint };
+          for (const row of rows) {
+            const item = { ...row.data, guestContributed: true as const, guestName: row.guest_name ?? undefined };
+            if (row.type === 'pain') {
+              const pp = item as PainPoint;
+              if (!newBp.painPoints.find((p) => p.id === pp.id)) {
+                newBp = {
+                  ...newBp,
+                  painPoints: [...newBp.painPoints, pp],
+                  actions: newBp.actions.map((a) =>
+                    pp.actionIds.includes(a.id) && !a.painPointIds.includes(pp.id)
+                      ? { ...a, painPointIds: [...a.painPointIds, pp.id] }
+                      : a
+                  ),
+                };
+              }
+            } else if (row.type === 'opportunity') {
+              const opp = item as Opportunity;
+              if (!newBp.opportunities.find((o) => o.id === opp.id)) {
+                newBp = {
+                  ...newBp,
+                  opportunities: [...newBp.opportunities, opp],
+                  actions: newBp.actions.map((a) =>
+                    opp.actionIds.includes(a.id) && !a.opportunityIds.includes(opp.id)
+                      ? { ...a, opportunityIds: [...a.opportunityIds, opp.id] }
+                      : a
+                  ),
+                };
+              }
+            } else if (row.type === 'question') {
+              const q = item as Question;
+              if (!(newBp.questions ?? []).find((qe) => qe.id === q.id)) {
+                newBp = {
+                  ...newBp,
+                  questions: [...(newBp.questions ?? []), q],
+                  actions: newBp.actions.map((a) =>
+                    q.actionIds.includes(a.id) && !(a.questionIds ?? []).includes(q.id)
+                      ? { ...a, questionIds: [...(a.questionIds ?? []), q.id] }
+                      : a
+                  ),
+                };
+              }
+            }
+          }
+
+          const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
+          const { nodes, edges } = blueprintToFlow(effectiveBp);
+          set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges });
+        } catch {}
+      },
+
       switchToBlueprint: (id) => {
         const bp = switchBlueprint(id);
         if (!bp) return;
@@ -374,6 +642,7 @@ export const useBlueprintStore = create<AppState>()(
           presentationEditMode: false, activePresentationId: null, currentKeyframeIndex: 0,
           overviewMode: false,
         });
+        setTimeout(() => useBlueprintStore.getState().loadGuestComments(), 0);
       },
 
       // ─── Action mutations ──────────────────────────────────────────────────
@@ -473,7 +742,11 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         const eff = vRead();
-        apply(updatedAt(vWrite(blueprint, { painPoints: eff.painPoints.map((p) => p.id === id ? { ...p, ...patch } : p) })));
+        apply(updatedAt(vWrite(blueprint, { painPoints: eff.painPoints.map((p) => {
+          if (p.id !== id) return p;
+          const { aiGenerated: _, ...merged } = { ...p, ...patch };
+          return merged;
+        }) })));
       },
 
       removePainPoint: (id) => {
@@ -505,7 +778,11 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         const eff = vRead();
-        apply(updatedAt(vWrite(blueprint, { opportunities: eff.opportunities.map((o) => o.id === id ? { ...o, ...patch } : o) })));
+        apply(updatedAt(vWrite(blueprint, { opportunities: eff.opportunities.map((o) => {
+          if (o.id !== id) return o;
+          const { aiGenerated: _, ...merged } = { ...o, ...patch };
+          return merged;
+        }) })));
       },
 
       removeOpportunity: (id) => {
@@ -537,7 +814,11 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         const eff = vRead();
-        apply(updatedAt(vWrite(blueprint, { questions: eff.questions.map((q) => q.id === id ? { ...q, ...patch } : q) })));
+        apply(updatedAt(vWrite(blueprint, { questions: eff.questions.map((q) => {
+          if (q.id !== id) return q;
+          const { aiGenerated: _, ...merged } = { ...q, ...patch };
+          return merged;
+        }) })));
       },
 
       removeQuestion: (id) => {
@@ -1142,11 +1423,6 @@ export const useBlueprintStore = create<AppState>()(
         set({ overviewGenerating: true });
 
         try {
-          const client = new Anthropic({
-            apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
-            dangerouslyAllowBrowser: true,
-          });
-
           const actorMap = new Map(blueprint.actors.map((a) => [a.id, a.name]));
           const phaseMap = new Map(blueprint.phases.map((p) => [p.id, p.name]));
 
@@ -1173,14 +1449,18 @@ Return ONLY a JSON object in this exact format:
   ]
 }`;
 
-          const response = await client.messages.create({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 1024,
-            messages: [{ role: 'user', content: prompt }],
+          const { data: overviewData, error: overviewError } = await supabase.functions.invoke('ai-overview', {
+            body: {
+              model: 'claude-sonnet-4-6',
+              max_tokens: 1024,
+              messages: [{ role: 'user', content: prompt }],
+            },
           });
+          if (overviewError) throw overviewError;
 
-          const text = response.content.find((b) => b.type === 'text');
-          if (!text || text.type !== 'text') throw new Error('No text response');
+          const overviewContent = (overviewData as { content: Array<{ type: string; text?: string }> }).content;
+          const text = overviewContent.find((b) => b.type === 'text');
+          if (!text || !text.text) throw new Error('No text response');
 
           const raw = text.text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '');
           const parsed = JSON.parse(raw) as { selected: { id: string; labelAbstract: string }[] };
@@ -1240,25 +1520,24 @@ Return ONLY a JSON object in this exact format:
             .filter((a) => a.actorId === actorId && a.phaseId === phaseId)
             .sort((a, b) => a.order - b.order);
 
-          const client = new Anthropic({
-            apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
-            dangerouslyAllowBrowser: true,
-          });
-
           const stepsText = cellActions
             .map((a, i) => `${i + 1}. ${a.label}${a.labelDetailed ? ': ' + a.labelDetailed : ''}`)
             .join('\n');
 
           const prompt = `You are describing a cluster of service steps for a high-level service blueprint overview. Actor: "${actor.name}". Phase: "${phase.name}". Steps in this cell:\n${stepsText}\n\nWrite a 2–3 sentence paragraph describing what this actor is doing during this phase and why it matters. Be concise and professional. Return only the paragraph, no other text.`;
 
-          const response = await client.messages.create({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 256,
-            messages: [{ role: 'user', content: prompt }],
+          const { data: cellData, error: cellError } = await supabase.functions.invoke('ai-overview', {
+            body: {
+              model: 'claude-sonnet-4-6',
+              max_tokens: 256,
+              messages: [{ role: 'user', content: prompt }],
+            },
           });
+          if (cellError) throw cellError;
 
-          const text = response.content.find((b) => b.type === 'text');
-          if (!text || text.type !== 'text') throw new Error('No text response');
+          const cellContent = (cellData as { content: Array<{ type: string; text?: string }> }).content;
+          const text = cellContent.find((b) => b.type === 'text');
+          if (!text || !text.text) throw new Error('No text response');
 
           const key = `${actorId}-${phaseId}`;
           const newBp = updatedAt({
@@ -1329,9 +1608,14 @@ Return ONLY a JSON object in this exact format:
         if (!blueprint) return;
         const newBp = updatedAt({
           ...blueprint,
-          storyboards: (blueprint.storyboards ?? []).map((s) =>
-            s.id === storyboardId ? { ...s, styleGuide: guide, updatedAt: new Date().toISOString() } : s
-          ),
+          storyboards: (blueprint.storyboards ?? []).map((s) => {
+            if (s.id !== storyboardId) return s;
+            const frames = s.frames.map((f) => ({
+              ...f,
+              imagePrompt: buildImagePrompt(f, guide, blueprint.actors),
+            }));
+            return { ...s, styleGuide: guide, frames, updatedAt: new Date().toISOString() };
+          }),
         });
         saveBlueprint(newBp);
         set({ blueprint: newBp });
@@ -1445,7 +1729,7 @@ Return ONLY a JSON object in this exact format:
           // 3. Generate images one by one
           for (const frame of framesWithPrompts) {
             set({ storyboardGeneratingFrameId: frame.id });
-            const imageUrl = await generateImage(frame.imagePrompt);
+            const imageUrl = await generateImage(frame.imagePrompt, currentBp.id, frame.id);
             if (imageUrl) {
               const { blueprint: bp3 } = get();
               if (!bp3) break;
@@ -1496,7 +1780,7 @@ Return ONLY a JSON object in this exact format:
 
         set({ storyboardGeneratingFrameId: frameId });
         try {
-          const imageUrl = await generateImage(frame.imagePrompt);
+          const imageUrl = await generateImage(frame.imagePrompt, blueprint.id, frameId);
           if (imageUrl) {
             const { blueprint: bp2 } = get();
             if (!bp2) return;
@@ -1515,10 +1799,65 @@ Return ONLY a JSON object in this exact format:
           set({ storyboardGeneratingFrameId: null });
         }
       },
+
+      regenerateAllFrames: async (storyboardId) => {
+        const { blueprint, storyboardGenerating } = get();
+        if (!blueprint || storyboardGenerating) return;
+        const sb = (blueprint.storyboards ?? []).find((s) => s.id === storyboardId);
+        if (!sb || sb.frames.length === 0) return;
+
+        set({ storyboardGenerating: true });
+        try {
+          for (const frame of sb.frames) {
+            set({ storyboardGeneratingFrameId: frame.id });
+            const imageUrl = await generateImage(frame.imagePrompt, blueprint.id, frame.id);
+            if (imageUrl) {
+              const { blueprint: bp2 } = get();
+              if (!bp2) break;
+              const newBp = updatedAt({
+                ...bp2,
+                storyboards: (bp2.storyboards ?? []).map((s) =>
+                  s.id === storyboardId
+                    ? { ...s, frames: s.frames.map((f) => f.id === frame.id ? { ...f, imageUrl } : f), updatedAt: new Date().toISOString() }
+                    : s
+                ),
+              });
+              saveBlueprint(newBp);
+              set({ blueprint: newBp });
+            }
+          }
+        } finally {
+          set({ storyboardGenerating: false, storyboardGeneratingFrameId: null });
+        }
+      },
     };
   })
 );
 
-// Bootstrap from localStorage on first import
-const saved = loadBlueprint();
-if (saved) useBlueprintStore.getState().setBlueprint(saved);
+// Async bootstrap: check for share token first, then normal auth
+const _shareToken = new URLSearchParams(window.location.search).get('share');
+if (_shareToken) {
+  // Guest / view-only mode — skip auth gate entirely
+  useBlueprintStore.getState().loadBlueprintByShareToken(_shareToken);
+} else {
+  // Normal auth flow
+  getSession().then((session) => {
+    if (session) {
+      useBlueprintStore.getState().setUser(session.user.id, session.user.email ?? '');
+    }
+    // else: stays in 'auth' mode until user signs in
+  });
+
+  // Keep auth state in sync (handles OTP verification + sign-out from other tabs)
+  onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_IN' && session) {
+      const { userId } = useBlueprintStore.getState();
+      if (!userId) {
+        useBlueprintStore.getState().setUser(session.user.id, session.user.email ?? '');
+      }
+    } else if (event === 'SIGNED_OUT') {
+      useBlueprintStore.setState({ mode: 'auth', userId: null, userEmail: null, blueprint: null,
+        rfNodes: [], rfEdges: [], activeVersionId: null });
+    }
+  });
+}

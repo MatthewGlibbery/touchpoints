@@ -2,7 +2,206 @@
 
 ## Current Objective
 
-Session V — UI fixes and polish (10 items).
+Auth and share links now working on localhost. Next step: deploy the app so share links are usable by real recipients.
+
+---
+
+## Post-AH Fixes — COMPLETE
+
+- [x] **Auth OTP**: `sendOTP` now passes `emailRedirectTo: window.location.origin`. Supabase dashboard required: email templates updated to show `{{ .Token }}`, Site URL + Redirect URLs set, custom SMTP (Resend) configured to bypass 2-email/hour free-tier rate limit.
+- [x] **Share link silent failure**: `handleGenerateLink` in ProjectBar now awaits `saveBlueprintCloud(blueprint)` before calling `createShareToken` — ensures the blueprint row exists in Supabase first. Error message shown in dropdown if creation still fails.
+- [x] **Share token encoding bug**: `blueprint_shares` table default `encode(gen_random_bytes(24), 'base64url')` fails on Supabase's PostgreSQL (unsupported encoding). Fixed by generating token client-side in `generateToken()` (`crypto.getRandomValues` → URL-safe base64) and passing it explicitly in the insert.
+- [x] **Cloud save visibility**: `saveBlueprintCloud` exported and now logs errors via `console.error` rather than swallowing them silently.
+
+---
+
+## Session AG Progress — COMPLETE
+
+- [x] AG1 — Edge function `supabase/functions/get-shared-blueprint/index.ts`: no-auth endpoint; validates token against `blueprint_shares`, returns `{ blueprint, canComment, shareId, blueprintRowId }`
+- [x] AG2 — `app/src/store/blueprint.store.ts`: added `isGuestView`, `guestCanComment`, `guestName`, `guestSessionId`, `guestShareId`, `guestBlueprintRowId`, `shareToken` state; added `loadBlueprintByShareToken`, `setGuestName`, `addGuestPainPoint`, `addGuestOpportunity`, `addGuestQuestion`, `loadGuestComments` actions; bootstrap checks `?share=` param first — if found, loads via edge function and skips auth gate
+- [x] AG3 — `app/src/lib/storage.ts`: added `getShareToken`, `createShareToken`, `deleteShareToken` + internal `getBlueprintRowId` helper
+- [x] AG4 — `app/src/App.tsx`: `isGuestView` hides all edit UI; renders `<NodeInspector />` if inspector is open; renders `<GuestNamePrompt />` when guest can comment and hasn't named themselves
+- [x] AG5 — `app/src/components/ui/ProjectBar.tsx`: Share button + dropdown (generate link / copy link / revoke) only when authenticated; uses `getShareToken` / `createShareToken` / `deleteShareToken` from storage
+- [x] AG6 — `app/src/components/canvas/BlueprintCanvas.tsx`: `isGuestView` added to store reads; used in `displayNodes` filter (removes editing nodes), `nodesDraggable`, `nodesConnectable`, `edgesReconnectable`, `selectionOnDrag` props
+- [x] AG7 — `app/src/components/storyboard/StoryboardView.tsx`: Export All, Style Guide, Generate buttons hidden when `isGuestView`
+
+## Session AH Progress — COMPLETE
+
+- [x] AH1 — `app/src/types/blueprint.ts`: added `guestContributed?: true` and `guestName?: string` to `PainPoint`, `Opportunity`, `Question`
+- [x] AH2 — `app/src/store/blueprint.store.ts`: guest state/actions — `addGuestPainPoint`, `addGuestOpportunity`, `addGuestQuestion` write to in-memory blueprint + `guest_comments` table; `loadGuestComments` fetches all guest comments for the blueprint (owner-only via RLS) and merges into in-memory state
+- [x] AH3 — New `app/src/components/auth/GuestNamePrompt.tsx`: "What should we call you?" modal; Continue → `setGuestName`; Skip → clears name; name stored in `sessionStorage`
+- [x] AH4 — `app/src/components/ui/NodeInspector.tsx`: `GuestBadge` component (teal, shows guest name); guest items show badge; non-guest items in guest view are read-only (no X button, no edit); guest view gets guest-add buttons if `guestCanComment`; delete step button hidden in guest view
+- [x] AH5 — `loadGuestComments` wired into `completeBoot` and `switchToBlueprint` so owner sees guest contributions automatically on load
+
+**Deployment note:** Share links generated on `localhost` are not usable by external recipients. App must be deployed to a public URL for share links to work end-to-end.
+
+---
+
+---
+
+## Cloud Storage / Auth / Sharing Plan (Sessions AD–AH)
+
+### Overview
+Move blueprint data off localStorage to Supabase (Postgres JSONB). Add passwordless email OTP auth. Add view-only share links. Let guests add pains/opps/questions. Move API keys server-side via Supabase Edge Functions. Lay the foundation for real-time collaboration without implementing it yet.
+
+**Key decisions:**
+- Backend: Supabase (Auth + Postgres + Edge Functions + Storage)
+- Blueprint stored as single JSONB blob per row — no data model restructuring
+- Share links via `?share=<token>` query param — no router needed
+- DALL-E images moved to Supabase Storage (replaces base64-in-localStorage)
+- `updated_at` / `updated_by` columns on `blueprints` table → real-time ready
+
+### Supabase schema (applied once before Session AD)
+```sql
+create table blueprints (
+  id         uuid primary key default gen_random_uuid(),
+  owner_id   uuid references auth.users(id) on delete cascade not null,
+  data       jsonb not null,
+  name       text generated always as (data->>'name') stored,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  updated_by uuid references auth.users(id)
+);
+alter table blueprints enable row level security;
+create policy "owner access" on blueprints
+  using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+create table blueprint_shares (
+  id           uuid primary key default gen_random_uuid(),
+  blueprint_id uuid references blueprints(id) on delete cascade not null,
+  token        text unique not null default encode(gen_random_bytes(24), 'base64url'),
+  can_comment  boolean default true,
+  created_at   timestamptz default now(),
+  expires_at   timestamptz
+);
+alter table blueprint_shares enable row level security;
+create policy "public share read" on blueprint_shares for select using (true);
+create policy "owner manage shares" on blueprint_shares
+  using (blueprint_id in (select id from blueprints where owner_id = auth.uid()))
+  with check (blueprint_id in (select id from blueprints where owner_id = auth.uid()));
+
+create table guest_comments (
+  id            uuid primary key default gen_random_uuid(),
+  share_id      uuid references blueprint_shares(id) on delete cascade not null,
+  blueprint_id  uuid references blueprints(id) on delete cascade not null,
+  type          text check (type in ('pain','opportunity','question')) not null,
+  data          jsonb not null,
+  guest_name    text,
+  guest_session text not null,
+  created_at    timestamptz default now()
+);
+alter table guest_comments enable row level security;
+create policy "public insert" on guest_comments for insert with check (true);
+create policy "owner read" on guest_comments for select
+  using (blueprint_id in (select id from blueprints where owner_id = auth.uid()));
+-- Supabase Storage bucket 'storyboard-images' created via dashboard (public: true)
+```
+
+### Session AE Progress — COMPLETE
+
+- [x] AE1 — `storage.ts`: `saveBlueprint` dual-writes (localStorage sync + Supabase background upsert via `saveBlueprintCloud`); `fetchBlueprintsFromCloud` (async, Supabase primary, syncs down to localStorage); `deleteBlueprint` fires cloud delete in background; `migrateLocalBlueprints` returns localStorage blueprints not yet in Supabase; `importBlueprintsToCloud` uploads a list of blueprints
+- [x] AE2 — `blueprint.store.ts`: `completeBoot` closure fetches from cloud, syncs localStorage, then loads most recent blueprint or goes to onboarding; `setUser` fires async bootstrap (checks migration first — if found, sets `pendingMigration` and stays in 'auth' mode); `pendingMigration: Blueprint[] | null` state added; `confirmMigration` (imports + boots) and `skipMigration` (boots without importing) actions added; `signOut` clears `pendingMigration`
+- [x] AE3 — `AuthScreen.tsx`: added `MigrationStep` component ("Import N projects?" with Confirm/Skip); `useEffect` on `pendingMigration` switches to 'migration' step; ternary chain extended to handle 'otp' | 'migration' steps
+- [x] AE4 — `ProjectBar.tsx`: reads `userEmail` from store; dropdown footer shows email + Sign Out button (LogOut icon, calls `signOut()`)
+
+---
+
+### Session AD — Auth gate + Supabase setup
+**Files to create:**
+- `app/src/lib/supabase.ts` — `createClient(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)` singleton
+- `app/src/lib/auth.ts` — `sendOTP(email)`, `verifyOTP(email, code)`, `getSession()`, `signOut()`, `onAuthStateChange(cb)`
+- `app/src/components/auth/AuthScreen.tsx` — two-step: email entry → 6-digit OTP entry
+
+**Files to modify:**
+- `app/.env.example` — add `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+- `app/src/store/blueprint.store.ts` — add `'auth'` to `AppMode`; add `userId`, `userEmail` state fields; add `setUser(id, email)` + `signOut()` actions; bootstrap checks `supabase.auth.getSession()` → if session, `setUser()` and proceed; else mode = `'auth'`; subscribe `onAuthStateChange`
+- `app/src/App.tsx` — add `{mode === 'auth' && <AuthScreen />}` branch
+- Storage still uses localStorage — no cloud reads/writes yet
+
+### Session AE — Cloud blueprint storage + migration
+**Files to modify:**
+- `app/src/lib/storage.ts` — dual-write: `saveBlueprint` → localStorage + Supabase upsert; `loadAllBlueprints` → Supabase fetch (localStorage fallback); `deleteBlueprint` → Supabase + localStorage; new `migrateLocalBlueprints()` → returns localStorage blueprints not yet in cloud
+- `app/src/store/blueprint.store.ts` — async bootstrap: after auth, `await loadAllBlueprints()` from Supabase; `saveBlueprint` sets `updated_by = userId`
+- `app/src/components/auth/AuthScreen.tsx` — after OTP verify: call `migrateLocalBlueprints()`; if found, show "Import N blueprint(s) from this device?" step
+- `app/src/components/ui/ProjectBar.tsx` — show `userEmail` + Sign Out button
+- `app/src/components/onboarding/OnboardingOverlay.tsx` — recent projects loads from cloud
+
+### Session AF Progress — COMPLETE
+
+- [x] AF1 — `supabase/functions/ai-generate/index.ts`: JWT-verified Anthropic proxy for blueprint generation
+- [x] AF2 — `supabase/functions/ai-overview/index.ts`: JWT-verified Anthropic proxy for overview + cell description generation
+- [x] AF3 — `supabase/functions/ai-storyboard/index.ts`: JWT-verified Anthropic proxy for storyboard generation; `type: 'image'` path calls DALL-E 3 + uploads to Supabase Storage `storyboard-images`, returns public URL (falls back to base64 data URL on upload error)
+- [x] AF4 — `app/src/lib/ai.ts`: replaced `new Anthropic({ dangerouslyAllowBrowser: true })` with `supabase.functions.invoke('ai-generate', ...)`; removed Anthropic SDK import
+- [x] AF5 — `app/src/lib/storyboard.ts`: same pattern for style guide + frame generation; `generateImage` now accepts `(prompt, blueprintId, frameId)` and delegates to `ai-storyboard` edge function for Storage upload
+- [x] AF6 — `app/src/store/blueprint.store.ts`: removed Anthropic SDK import; `generateOverview` and `generateCellDescription` use `supabase.functions.invoke('ai-overview', ...)`; all `generateImage` call sites updated with `blueprintId` + `frameId` args
+- [x] AF7 — `app/src/components/ui/PhaseInspector.tsx`: inline `generateDescription` migrated from Anthropic SDK to `supabase.functions.invoke('ai-overview', ...)`
+- [x] AF8 — `app/src/components/storyboard/StoryboardView.tsx`: removed `hasOpenAiKey` guards (key is now server-side); "Save & Regenerate All" always shown when frames exist
+- [x] AF9 — `app/.env.example`: removed `VITE_ANTHROPIC_API_KEY` and `VITE_OPENAI_API_KEY`; added note to set them as Supabase secrets
+
+**Supabase secrets to set:** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
+
+---
+
+### Session AF — Server-side AI proxy (Edge Functions)
+**Files to create:**
+- `supabase/functions/ai-generate/index.ts` — Anthropic proxy for `generateBlueprint`; requires JWT
+- `supabase/functions/ai-overview/index.ts` — Anthropic proxy for overview generation; requires JWT
+- `supabase/functions/ai-storyboard/index.ts` — Anthropic + DALL-E proxy; uploads images to Supabase Storage `storyboard-images`; requires JWT
+
+**Files to modify:**
+- `app/src/lib/ai.ts` — replace `new Anthropic({ dangerouslyAllowBrowser: true })` with `supabase.functions.invoke('ai-generate', ...)`
+- `app/src/lib/storyboard.ts` — same pattern; `generateImage` returns Supabase Storage URL
+- `app/.env.example` — remove `VITE_ANTHROPIC_API_KEY`, `VITE_OPENAI_API_KEY`; note they are now Supabase secrets
+
+**Supabase secrets:** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
+
+### Session AF Cleanup — COMPLETE
+- [x] `@anthropic-ai/sdk` uninstalled from `app/package.json` (no longer imported anywhere in app source)
+- [x] `VITE_ANTHROPIC_API_KEY` and `VITE_OPENAI_API_KEY` removed from `app/.env.local`
+
+---
+
+### Session AG — Share links + view-only guest access
+**Files to modify:**
+- `app/src/store/blueprint.store.ts` — add `isGuestView: boolean`, `shareToken: string | null`; add `generateShareLink`, `revokeShareLink`, `loadBlueprintByShareToken`; bootstrap: check `?share=` param → `loadBlueprintByShareToken` + skip auth
+- `app/src/App.tsx` — `isGuestView`: skip auth, go to canvas read-only, hide all edit UI
+- `app/src/components/ui/ProjectBar.tsx` — Share button → dropdown: current link + "Copy" + "Revoke" + "Generate"
+- `app/src/components/canvas/BlueprintCanvas.tsx` — `isGuestView` treated same as `presentMode` for interaction guards
+- `app/src/components/storyboard/StoryboardView.tsx` — hide Generate/Style Guide/Export in guest view
+- Edge Function `get-shared-blueprint` validates token → returns blueprint data (no auth JWT needed)
+
+### Session AH — Guest contributions
+**Files to modify:**
+- `app/src/store/blueprint.store.ts` — add `guestName: string | null`, `guestSessionId: string`; add `setGuestName`, `addGuestPainPoint`, `addGuestOpportunity`, `addGuestQuestion` (write to `guest_comments` table); `loadBlueprintWithGuestComments` merges rows into in-memory blueprint with `guestContributed: true`
+- `app/src/components/ui/NodeInspector.tsx` — show guest items with "Guest" badge (same pattern as `aiGenerated`); owner can delete; guest view hides delete
+- New `app/src/components/auth/GuestNamePrompt.tsx` — "What should we call you?" modal with optional skip; stores in `sessionStorage` + `guestName`
+- `app/src/types/blueprint.ts` — add `guestContributed?: true` to `PainPoint`, `Opportunity`, `Question`
+
+### Real-time foundation (no extra work needed)
+After AH: enable Supabase Realtime on `blueprints` table (dashboard toggle) + add `supabase.from('blueprints').on('UPDATE', cb).subscribe()` in `storage.ts` + call `setBlueprint(newData)` in callback. No schema or data model changes needed.
+
+---
+
+## Session AD Progress — COMPLETE
+
+- [x] AD1 — `@supabase/supabase-js` installed
+- [x] AD2 — `app/src/lib/supabase.ts`: `createClient` singleton using `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`
+- [x] AD2 — `app/src/lib/auth.ts`: `sendOTP`, `verifyOTP`, `getSession`, `signOut`, `onAuthStateChange`
+- [x] AD3 — `app/src/components/auth/AuthScreen.tsx`: two-step UI (email → 6-digit OTP boxes); paste support; matches design system + dot-background
+- [x] AD4 — `blueprint.store.ts`: `AppMode` extended with `'auth'`; `userId`/`userEmail` state; `setUser`/`signOut` actions; initial mode is `'auth'`; async bootstrap calls `getSession()` → `setUser()` or stays on auth; `onAuthStateChange` subscription keeps state in sync
+- [x] AD4 — `App.tsx`: renders `<AuthScreen />` when `mode === 'auth'`
+- [x] AD5 — `app/.env.example`: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` entries added
+
+**Storage unchanged** — still localStorage only. Cloud sync comes in Session AE.
+
+---
+
+## Session AC Progress — COMPLETE
+
+- [x] AC1 — `aiGenerated?: true` added to `PainPoint`, `Opportunity`, `Question` types
+- [x] AC2 — `lib/ai.ts`: all AI-generated items marked `aiGenerated: true`; `opportunities` and `questions` arrays added to action tool schema so Claude links them to specific steps; normalization resolves and back-fills `actionIds` for all three types (previously opportunities and questions had `actionIds: []` and never appeared on cards)
+- [x] AC3 — `updatePainPoint`, `updateOpportunity`, `updateQuestion` in store strip `aiGenerated` on any edit (destructure-out pattern, no flag in patch type)
+- [x] AC4 — NodeInspector: AI badge (purple Sparkles + "AI" pill) shown on `aiGenerated` items inline with the severity/effort/type picker row; vanishes on first edit
 
 ---
 
@@ -280,6 +479,15 @@ All Session X items completed — see Session X Progress below.
 - [x] AA2 — Selection highlight follows navigation: `ActionNode` reads `selectedNodeId === action.id` from store instead of ReactFlow's `selected` prop; inspector arrow buttons now correctly highlight the new card and unhighlight the previous one
 - [x] AA3 — GitHub repo initialised and pushed: root `.gitignore`, `app/.env.example`, initial commit of 79 files; live at `https://github.com/MatthewGlibbery/touchpoints` (public)
 - [x] AA4 — README at project root: explains the tool, features, and local setup for a non-technical audience
+
+---
+
+## Session AB Progress — COMPLETE
+
+- [x] AB1 — `updateStoryboardStyleGuide` now rebuilds all frame `imagePrompt` strings (via `buildImagePrompt`) whenever the style guide is saved — prompts always reflect current guide
+- [x] AB2 — `regenerateAllFrames(storyboardId)` store action: loops all frames sequentially, sets `storyboardGeneratingFrameId` per frame, calls `generateImage`; uses `storyboardGenerating` for overall progress state
+- [x] AB3 — `lib/styleLibrary.ts`: `StylePreset` type + `loadPresets`/`savePreset`/`deletePreset` CRUD stored in localStorage key `touchpoints-style-presets` (independent of Blueprint, cross-project)
+- [x] AB4 — `StyleGuideModal` overhauled: presets strip below Base Style (click to apply, × to delete, highlighted when active); "Save as preset" inline name input; footer now has Cancel | "Save & Regenerate All" (only when frames + OpenAI key) | Save
 
 ---
 

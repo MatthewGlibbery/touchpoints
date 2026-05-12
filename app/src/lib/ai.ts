@@ -1,10 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { supabase } from './supabase';
 import type { Blueprint, Actor, Phase, Action, Touchpoint, PainPoint, Opportunity, Question } from '../types/blueprint';
-
-const client = new Anthropic({
-  apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
-  dangerouslyAllowBrowser: true,
-});
 
 const SYSTEM_PROMPT = `You are a service design expert. Given input (a transcript, description, or document), extract a structured service blueprint.
 
@@ -30,24 +25,29 @@ export async function generateBlueprint(
 ): Promise<Blueprint> {
   onStatus('Analyzing your input...');
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
-    system: SYSTEM_PROMPT,
-    tools: [blueprintTool],
-    tool_choice: { type: 'any' },
-    messages: [
-      {
-        role: 'user',
-        content: `Please analyze this and generate a service blueprint:\n\n${input}`,
-      },
-    ],
+  const { data, error } = await supabase.functions.invoke('ai-generate', {
+    body: {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      system: SYSTEM_PROMPT,
+      tools: [blueprintTool],
+      tool_choice: { type: 'any' },
+      messages: [
+        {
+          role: 'user',
+          content: `Please analyze this and generate a service blueprint:\n\n${input}`,
+        },
+      ],
+    },
   });
+
+  if (error) throw new Error(`Blueprint generation failed: ${error.message}`);
 
   onStatus('Building blueprint...');
 
-  const toolUse = response.content.find((b) => b.type === 'tool_use');
-  if (!toolUse || toolUse.type !== 'tool_use') {
+  const content = (data as { content: Array<{ type: string; input?: unknown }> }).content;
+  const toolUse = content.find((b) => b.type === 'tool_use');
+  if (!toolUse) {
     throw new Error('No blueprint was generated. Please try again.');
   }
 
@@ -66,6 +66,7 @@ type RawAction = {
   touchpoints?: string[];
   painPoints?: string[];
   opportunities?: string[];
+  questions?: string[];
 };
 type RawTouchpoint = { label: string; type?: string };
 type RawPainPoint = { description: string; actorName?: string; phaseName?: string; severity?: string };
@@ -119,6 +120,7 @@ function normalizeBlueprintResponse(raw: RawBlueprint): Blueprint {
     description: pp.description,
     severity: (pp.severity as PainPoint['severity']) ?? 'medium',
     actionIds: [],
+    aiGenerated: true,
   }));
 
   const opportunities: Opportunity[] = (raw.opportunities ?? []).map((o, i) => ({
@@ -126,16 +128,20 @@ function normalizeBlueprintResponse(raw: RawBlueprint): Blueprint {
     description: o.description,
     actionIds: [],
     painPointIds: [],
+    aiGenerated: true,
   }));
 
   const questions: Question[] = (raw.questions ?? []).map((q, i) => ({
     id: `q-${i}`,
     text: q.text,
     actionIds: [],
+    aiGenerated: true,
   }));
 
   const tpByLabel = new Map(touchpoints.map((t) => [t.label.toLowerCase(), t]));
   const ppByDesc = new Map(painPoints.map((p) => [p.description.toLowerCase(), p]));
+  const oppByDesc = new Map(opportunities.map((o) => [o.description.toLowerCase(), o]));
+  const qByText = new Map(questions.map((q) => [q.text.toLowerCase(), q]));
 
   const actionCountPerCell = new Map<string, number>();
 
@@ -156,12 +162,26 @@ function normalizeBlueprintResponse(raw: RawBlueprint): Blueprint {
       .map((desc) => ppByDesc.get(desc.toLowerCase())?.id)
       .filter(Boolean) as string[];
 
-    // Link pain points back to this action
+    const opportunityIds = (a.opportunities ?? [])
+      .map((desc) => oppByDesc.get(desc.toLowerCase())?.id)
+      .filter(Boolean) as string[];
+
+    const questionIds = (a.questions ?? [])
+      .map((text) => qByText.get(text.toLowerCase())?.id)
+      .filter(Boolean) as string[];
+
+    // Link items back to this action
     painPointIds.forEach((ppId) => {
       const pp = painPoints.find((p) => p.id === ppId);
-      if (pp && !pp.actionIds.includes(`action-${i}`)) {
-        pp.actionIds.push(`action-${i}`);
-      }
+      if (pp && !pp.actionIds.includes(`action-${i}`)) pp.actionIds.push(`action-${i}`);
+    });
+    opportunityIds.forEach((oppId) => {
+      const opp = opportunities.find((o) => o.id === oppId);
+      if (opp && !opp.actionIds.includes(`action-${i}`)) opp.actionIds.push(`action-${i}`);
+    });
+    questionIds.forEach((qId) => {
+      const q = questions.find((q) => q.id === qId);
+      if (q && !q.actionIds.includes(`action-${i}`)) q.actionIds.push(`action-${i}`);
     });
 
     return [{
@@ -173,8 +193,8 @@ function normalizeBlueprintResponse(raw: RawBlueprint): Blueprint {
       labelAbstract: a.labelAbstract,
       touchpointIds,
       painPointIds,
-      opportunityIds: [],
-      questionIds: [],
+      opportunityIds,
+      questionIds,
       order,
     }];
   });
@@ -194,7 +214,7 @@ function normalizeBlueprintResponse(raw: RawBlueprint): Blueprint {
   };
 }
 
-const blueprintTool: Anthropic.Tool = {
+const blueprintTool = {
   name: 'create_blueprint',
   description: 'Generate a structured service blueprint from the provided input',
   input_schema: {
@@ -230,7 +250,9 @@ const blueprintTool: Anthropic.Tool = {
             labelDetailed: { type: 'string', description: 'Longer micro-detail description' },
             labelAbstract: { type: 'string', description: 'One-word or short abstract label' },
             touchpoints: { type: 'array', items: { type: 'string' }, description: 'Touchpoint labels that apply' },
-            painPoints: { type: 'array', items: { type: 'string' }, description: 'Pain point descriptions that apply' },
+            painPoints: { type: 'array', items: { type: 'string' }, description: 'Pain point descriptions that apply to this specific step' },
+            opportunities: { type: 'array', items: { type: 'string' }, description: 'Opportunity descriptions that apply to this specific step' },
+            questions: { type: 'array', items: { type: 'string' }, description: 'Open question texts that apply to this specific step' },
           },
         },
       },

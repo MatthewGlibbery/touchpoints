@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, User, Globe, Building2, Users, Activity, Plus, Trash2, Diamond, Film, Image, Tag as TagIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, User, Globe, Building2, Users, Activity, Plus, Trash2, Diamond, Film, Image, Tag as TagIcon, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import type { PainPoint, Opportunity, Question, ActionMedia } from '../../types/blueprint';
 import { Panel, IconButton, FieldBlock, TabBar, inputStyle } from './primitives';
@@ -31,6 +31,11 @@ export function NodeInspector() {
   const animateToNode = useBlueprintStore((s) => s.animateToNode);
   const inspectorRequestedTab = useBlueprintStore((s) => s.inspectorRequestedTab);
   const clearInspectorRequestedTab = useBlueprintStore((s) => s.clearInspectorRequestedTab);
+  const isGuestView = useBlueprintStore((s) => s.isGuestView);
+  const guestCanComment = useBlueprintStore((s) => s.guestCanComment);
+  const addGuestPainPoint = useBlueprintStore((s) => s.addGuestPainPoint);
+  const addGuestOpportunity = useBlueprintStore((s) => s.addGuestOpportunity);
+  const addGuestQuestion = useBlueprintStore((s) => s.addGuestQuestion);
 
   const [activeTab, setActiveTab] = useState<Tab>('details');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -137,15 +142,17 @@ export function NodeInspector() {
         {activeTab === 'details' && (
           <>
             <FieldBlock label="Step name">
-              <input value={labelDraft} onChange={(e) => setLabelDraft(e.target.value)}
-                onBlur={() => { const v = labelDraft.trim(); if (v && v !== action.label) updateAction(action.id, { label: v }); }}
+              <input value={labelDraft} onChange={(e) => !isGuestView && setLabelDraft(e.target.value)}
+                onBlur={() => { if (isGuestView) return; const v = labelDraft.trim(); if (v && v !== action.label) updateAction(action.id, { label: v }); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                style={inputStyle} />
+                readOnly={isGuestView}
+                style={{ ...inputStyle, cursor: isGuestView ? 'default' : undefined }} />
             </FieldBlock>
             <FieldBlock label="What this step is responsible for">
-              <textarea value={detailDraft} onChange={(e) => setDetailDraft(e.target.value)}
-                onBlur={() => { const v = detailDraft.trim(); if (v !== (action.labelDetailed ?? '')) updateAction(action.id, { labelDetailed: v || undefined }); }}
-                rows={4} style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 }} />
+              <textarea value={detailDraft} onChange={(e) => !isGuestView && setDetailDraft(e.target.value)}
+                onBlur={() => { if (isGuestView) return; const v = detailDraft.trim(); if (v !== (action.labelDetailed ?? '')) updateAction(action.id, { labelDetailed: v || undefined }); }}
+                readOnly={isGuestView}
+                rows={4} style={{ ...inputStyle, resize: isGuestView ? 'none' : 'vertical', lineHeight: 1.6, cursor: isGuestView ? 'default' : undefined }} />
             </FieldBlock>
 
             {/* Decision point tag */}
@@ -184,10 +191,12 @@ export function NodeInspector() {
           <>
             {painPoints.map((pp) => (
               <PainPointItem key={pp.id} pp={pp}
+                isGuestView={isGuestView}
                 onUpdate={(patch) => updatePainPoint(pp.id, patch)}
                 onRemove={() => removePainPoint(pp.id)} />
             ))}
-            <AddButton onClick={() => addPainPoint(action.id, '', 'medium')} label="Add pain point" />
+            {!isGuestView && <AddButton onClick={() => addPainPoint(action.id, '', 'medium')} label="Add pain point" />}
+            {isGuestView && guestCanComment && <AddButton onClick={() => addGuestPainPoint(action.id, '', 'medium')} label="Add pain point" />}
           </>
         )}
 
@@ -196,10 +205,12 @@ export function NodeInspector() {
           <>
             {opportunities.map((opp) => (
               <OppItem key={opp.id} opp={opp}
+                isGuestView={isGuestView}
                 onUpdate={(patch) => updateOpportunity(opp.id, patch)}
                 onRemove={() => removeOpportunity(opp.id)} />
             ))}
-            <AddButton onClick={() => addOpportunity(action.id, '')} label="Add opportunity" />
+            {!isGuestView && <AddButton onClick={() => addOpportunity(action.id, '')} label="Add opportunity" />}
+            {isGuestView && guestCanComment && <AddButton onClick={() => addGuestOpportunity(action.id, '')} label="Add opportunity" />}
           </>
         )}
 
@@ -208,17 +219,19 @@ export function NodeInspector() {
           <>
             {questions.map((q) => (
               <QuestionItem key={q.id} q={q}
+                isGuestView={isGuestView}
                 onUpdate={(patch) => updateQuestion(q.id, patch)}
                 onRemove={() => removeQuestion(q.id)} />
             ))}
-            <AddButton onClick={() => addQuestion(action.id, '')} label="Add question" />
+            {!isGuestView && <AddButton onClick={() => addQuestion(action.id, '')} label="Add question" />}
+            {isGuestView && guestCanComment && <AddButton onClick={() => addGuestQuestion(action.id, '')} label="Add question" />}
           </>
         )}
 
       </div>
 
-      {/* Delete step — only on Details tab */}
-      {activeTab === 'details' && <div style={{ padding: '0 18px 16px', flexShrink: 0 }}>
+      {/* Delete step — only on Details tab, not in guest view */}
+      {activeTab === 'details' && !isGuestView && <div style={{ padding: '0 18px 16px', flexShrink: 0 }}>
         <div style={{ height: 1, background: 'var(--border-subtle)', marginBottom: 12 }} />
         <button
           onClick={() => setConfirmDelete(true)}
@@ -262,6 +275,38 @@ export function NodeInspector() {
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 
+function AIBadge() {
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+      padding: '1px 7px', fontSize: 10, fontWeight: 600,
+      background: 'rgba(139,92,246,0.1)', color: '#8B5CF6',
+      border: '1px solid rgba(139,92,246,0.2)',
+      borderRadius: 'var(--radius-pill)',
+      flexShrink: 0,
+    }}>
+      <Sparkles size={9} />
+      AI
+    </div>
+  );
+}
+
+function GuestBadge({ name }: { name?: string }) {
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+      padding: '1px 7px', fontSize: 10, fontWeight: 600,
+      background: 'rgba(20,184,166,0.1)', color: '#14B8A6',
+      border: '1px solid rgba(20,184,166,0.25)',
+      borderRadius: 'var(--radius-pill)',
+      flexShrink: 0,
+    }}>
+      <User size={9} />
+      {name ? name : 'Guest'}
+    </div>
+  );
+}
+
 function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <button onClick={onClick} style={{
@@ -275,46 +320,64 @@ function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
   );
 }
 
-function PainPointItem({ pp, onUpdate, onRemove }: { pp: PainPoint; onUpdate: (p: Partial<Pick<PainPoint, 'description' | 'severity'>>) => void; onRemove: () => void }) {
+function PainPointItem({ pp, isGuestView, onUpdate, onRemove }: { pp: PainPoint; isGuestView?: boolean; onUpdate: (p: Partial<Pick<PainPoint, 'description' | 'severity'>>) => void; onRemove: () => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const readonly = isGuestView && !pp.guestContributed;
   useEffect(() => { if (pp.description === '' && ref.current) ref.current.focus(); }, []);
 
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px 10px', paddingRight: 36, background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.15)', borderRadius: 'var(--radius-md)' }}>
-      <IconButton icon={<X size={11} />} onClick={onRemove} size={22} style={{ position: 'absolute', top: 8, right: 8 }} />
-      <SeverityPicker value={pp.severity} onChange={(s) => onUpdate({ severity: s })} />
+      {!readonly && <IconButton icon={<X size={11} />} onClick={onRemove} size={22} style={{ position: 'absolute', top: 8, right: 8 }} />}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <SeverityPicker value={pp.severity} onChange={(s) => !readonly && onUpdate({ severity: s })} />
+        {pp.aiGenerated && <AIBadge />}
+        {pp.guestContributed && <GuestBadge name={pp.guestName} />}
+      </div>
       <textarea ref={ref} value={pp.description} placeholder="Describe the pain point…"
-        onChange={(e) => onUpdate({ description: e.target.value })}
+        readOnly={readonly}
+        onChange={(e) => !readonly && onUpdate({ description: e.target.value })}
         rows={2} style={{ ...inputStyle, resize: 'none', background: 'transparent', border: '1px solid transparent', padding: '2px 4px', fontSize: 13 }} />
     </div>
   );
 }
 
-function OppItem({ opp, onUpdate, onRemove }: { opp: Opportunity; onUpdate: (p: Partial<Pick<Opportunity, 'description' | 'effort'>>) => void; onRemove: () => void }) {
+function OppItem({ opp, isGuestView, onUpdate, onRemove }: { opp: Opportunity; isGuestView?: boolean; onUpdate: (p: Partial<Pick<Opportunity, 'description' | 'effort'>>) => void; onRemove: () => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const readonly = isGuestView && !opp.guestContributed;
   useEffect(() => { if (opp.description === '' && ref.current) ref.current.focus(); }, []);
 
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px 10px', paddingRight: 36, background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.15)', borderRadius: 'var(--radius-md)' }}>
-      <IconButton icon={<X size={11} />} onClick={onRemove} size={22} style={{ position: 'absolute', top: 8, right: 8 }} />
-      <EffortPicker value={opp.effort} onChange={(e) => onUpdate({ effort: e })} />
+      {!readonly && <IconButton icon={<X size={11} />} onClick={onRemove} size={22} style={{ position: 'absolute', top: 8, right: 8 }} />}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <EffortPicker value={opp.effort} onChange={(e) => !readonly && onUpdate({ effort: e })} />
+        {opp.aiGenerated && <AIBadge />}
+        {opp.guestContributed && <GuestBadge name={opp.guestName} />}
+      </div>
       <textarea ref={ref} value={opp.description} placeholder="Describe the opportunity…"
-        onChange={(e) => onUpdate({ description: e.target.value })}
+        readOnly={readonly}
+        onChange={(e) => !readonly && onUpdate({ description: e.target.value })}
         rows={2} style={{ ...inputStyle, resize: 'none', background: 'transparent', border: '1px solid transparent', padding: '2px 4px', fontSize: 13 }} />
     </div>
   );
 }
 
-function QuestionItem({ q, onUpdate, onRemove }: { q: Question; onUpdate: (p: Partial<Pick<Question, 'text' | 'type'>>) => void; onRemove: () => void }) {
+function QuestionItem({ q, isGuestView, onUpdate, onRemove }: { q: Question; isGuestView?: boolean; onUpdate: (p: Partial<Pick<Question, 'text' | 'type'>>) => void; onRemove: () => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const readonly = isGuestView && !q.guestContributed;
   useEffect(() => { if (q.text === '' && ref.current) ref.current.focus(); }, []);
 
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px 10px', paddingRight: 36, background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: 'var(--radius-md)' }}>
-      <IconButton icon={<X size={11} />} onClick={onRemove} size={22} style={{ position: 'absolute', top: 8, right: 8 }} />
-      <QuestionTypePicker value={q.type} onChange={(t) => onUpdate({ type: t })} />
+      {!readonly && <IconButton icon={<X size={11} />} onClick={onRemove} size={22} style={{ position: 'absolute', top: 8, right: 8 }} />}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <QuestionTypePicker value={q.type} onChange={(t) => !readonly && onUpdate({ type: t })} />
+        {q.aiGenerated && <AIBadge />}
+        {q.guestContributed && <GuestBadge name={q.guestName} />}
+      </div>
       <textarea ref={ref} value={q.text} placeholder="What do you need to know?"
-        onChange={(e) => onUpdate({ text: e.target.value })}
+        readOnly={readonly}
+        onChange={(e) => !readonly && onUpdate({ text: e.target.value })}
         rows={2} style={{ ...inputStyle, resize: 'none', background: 'transparent', border: '1px solid transparent', padding: '2px 4px', fontSize: 13 }} />
     </div>
   );
