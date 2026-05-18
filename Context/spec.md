@@ -53,7 +53,7 @@ User input → AI (Claude tool use) → Blueprint (typed data model)
 
 | Concern | Choice |
 |---|---|
-| Framework | React 18 + TypeScript |
+| Framework | React 19 + TypeScript |
 | Bundler | Vite |
 | Canvas | `@xyflow/react` v12 |
 | State | Zustand (`subscribeWithSelector`) |
@@ -73,14 +73,11 @@ User input → AI (Claude tool use) → Blueprint (typed data model)
 type Actor            = { id, name, color, order, bio?, goals?, portraitUrl? }
 type Phase            = { id, name, order, substepCount?, description?, conditional?, conditionLabel? }
 type ActionMedia      = { id, type: 'image'|'gif'|'video', url, caption? }
-type StatusTransition = { fromStatusId?: string|null, toStatusId?: string|null }
-type ServiceStatus    = { id, label, color }
 type Action           = { id, actorId, phaseId, label, labelDetailed?, labelAbstract?,
                           touchpointIds, painPointIds, opportunityIds, questionIds, order,
                           tags?,              // e.g. ['decision-point']
                           media?,             // ActionMedia[]
                           touchpointLabels?,  // per-action touchpoint tag selections
-                          statusTransition?   // StatusTransition
                         }
 type Touchpoint  = { id, label, type: 'interface' | 'system' | 'human' }
 type PainPoint   = { id, description, severity: 'low'|'medium'|'high', actionIds, aiGenerated?: true, guestContributed?: true, guestName?: string }
@@ -116,8 +113,16 @@ type Blueprint   = { id, name, actors, phases, actions, touchpoints,
                      overviewActionIds?,       // IDs of AI-selected representative actions
                      overviewCellDescriptions?, // Record<"${actorId}-${phaseId}", string> — AI descriptions per cell
                      storyboards?,      // Journey Map storyboards
-                     statuses?,         // ServiceStatus[] — named status vocabulary
+                     statusLanes?,      // StatusLane[] — horizontal lanes between phase header and actor rows
+                     timelineLanes?,    // TimelineLane[] — horizontal lanes above phase header
                    }
+
+// Lanes: horizontal tracks outside the actor swimlane region. Each lane has
+// segments anchored to one or more contiguous columns on the existing phase
+// grid (column index = global, same as `phaseColumns.startCol + order`).
+type LaneSegment   = { id, label, startCol, endCol, color? }
+type StatusLane    = { id, name, color, order, visible, segments: LaneSegment[] }
+type TimelineLane  = { id, name, color, order, visible, segments: LaneSegment[] }
 
 // Storyboard / Journey Map types
 type StoryboardStyleGuide = { baseStyle: string, characterDescriptions: Record<actorId, string> }
@@ -152,7 +157,18 @@ ROW_HEIGHT              = 200px   ← minimum row height bound
 ROW_HEIGHT_MEDIA        = 300px   ← kept for reference; actual row height now dynamic
 H_CELL_PAD              = 30px    ← (PHASE_WIDTH - ACTION_NODE_WIDTH) / 2
 OVERVIEW_CARD_HEIGHT    = 56px    ← fixed card height for all action nodes in overview mode
+TIMELINE_LANE_HEIGHT    = 44px    ← per-row height for timeline lanes (above phase header)
+STATUS_LANE_HEIGHT      = 56px    ← per-row height for status lanes (between phase header and actors)
 ```
+
+### Vertical regions
+The canvas is divided into stacked horizontal regions (Y offsets accumulate top-down):
+1. **Timeline lane region** — `timelineRegionHeight = visibleTimelineLanes * TIMELINE_LANE_HEIGHT`. Stacks above phase header. 0 height if no visible timeline lanes.
+2. **Phase header** — `PHASE_HEADER_HEIGHT` at `y = timelineRegionHeight`.
+3. **Status lane region** — `statusRegionHeight = visibleStatusLanes * STATUS_LANE_HEIGHT`. Below phase header, above actors. 0 height if no visible status lanes.
+4. **Actor region** — swimlanes + action cards at `y = timelineRegionHeight + PHASE_HEADER_HEIGHT + statusRegionHeight`.
+
+`computeLaneOffsets(blueprint, isOverview)` returns `{ tLanes, sLanes, timelineRegionHeight, statusRegionHeight, phaseHeaderY, statusRegionY, actorRegionY }`. In overview mode lanes are hidden (both regions collapse to 0). All Y-positions in `blueprintToFlow` derive from `phaseHeaderY` / `actorRegionY`. Hit-testing in `getCellFromPosition` shifts the actor lookup by `actorRegionY`.
 
 ### Dynamic card and row heights
 Card height is estimated per-action by `estimateActionHeight(action: Action): number`:
@@ -196,6 +212,11 @@ Each phase can contain one or more **substep columns** (`substepCount` on Phase;
 | `columnInserter` | Insert a new substep column within a phase | Hover shows guide; click → `insertSubstep` |
 | `phaseBoundary` | Drag handle between adjacent phases | Drag L/R → `movePhaseBoundary` |
 | `phaseAdder` | "+" button after the last phase header | Click → `addPhase('New Phase')` |
+| `statusLaneLabel` | Lane name in left column for status lane | Double-click → rename; hover → eye toggle + delete |
+| `timelineLaneLabel` | Lane name in left column for timeline lane | Double-click → rename; hover → eye toggle + delete |
+| `laneBody` | Click-to-add segment overlay spanning the lane row | Hover shows column highlight + `+`; click → `addStatusSegment`/`addTimelineSegment` at hovered column |
+| `statusSegment` | Pill-style segment within a status lane | Drag body → move (snap to columns); drag edges → resize; double-click → rename label; hover delete (×) |
+| `timelineSegment` | Dotted-line segment with centered duration label within a timeline lane | Same drag/resize/rename behaviors as statusSegment |
 
 All node types are defined in `app/src/components/canvas/nodeTypes.ts` and shared between `BlueprintCanvas` and `SplitCanvas`.
 
@@ -295,7 +316,7 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 | Field | Type | Purpose |
 |---|---|---|
 | `mode` | `'onboarding'\|'canvas'` | App screen |
-| `canvasView` | `'edit'\|'pain-points'\|'opportunities'\|'questions'\|'status'` | View filter |
+| `canvasView` | `'edit'\|'pain-points'\|'opportunities'\|'questions'` | View filter |
 | `blueprint` | `Blueprint\|null` | Source of truth (full data incl. all versions) |
 | `rfNodes`, `rfEdges` | ReactFlow types | Derived layout, recalculated on every mutation |
 | `selectedNodeId` | `string\|null` | Opens NodeInspector |
@@ -341,6 +362,9 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 | `redoStack` | `Blueprint[]` | Up to 50 future snapshots for redo |
 
 NodeInspector and ActorPanel are **mutually exclusive**: opening one always closes the other.
+
+### Selector purity constraint (React 19 + Zustand 5)
+Zustand 5 uses `useSyncExternalStore`. Inline selectors are new function references every render, so `getSnapshot` changes every render and React re-evaluates the snapshot. If the snapshot returns a **new object/array reference** on every call (e.g. `s.x?.y ?? []`, `s.x.filter(...)`, `{ a: s.a, b: s.b }`), React sees `Object.is(old, new) === false`, treats it as a store change, and schedules another synchronous re-render — causing an infinite loop and error #185. **Rule: selectors must return stable references.** Apply `?? []` / `?? {}` *outside* the `useBlueprintStore(...)` call.
 
 ### Version-aware mutation pattern
 The store uses two factory-level closures (`vRead`, `vWrite`) so all content mutations are version-aware without per-mutation boilerplate:
@@ -390,7 +414,10 @@ The store uses two factory-level closures (`vRead`, `vWrite`) so all content mut
 - `openInspectorToTab(actionId, tab)` / `clearInspectorRequestedTab()` — badge-click routes NodeInspector to a specific tab (pains/opportunities/questions)
 - `setCompareSyncViewport(on)` — toggles bidirectional pan/zoom sync in SplitCanvas; stored as `compareSyncViewport`
 - `undo()` / `redo()` — pop from `undoStack`/`redoStack`; call `apply(prev/next)` to restore blueprint + recalculate layout; keyboard: Cmd+Z / Cmd+Shift+Z (or Ctrl+Y); blocked when cursor is in an input/textarea
-- `addStatus(label, color)` / `updateStatus(id, patch)` / `removeStatus(id)` — manage the `blueprint.statuses` vocabulary; `removeStatus` cascades: clears `statusTransition` references in all actions that pointed to that status; all three call `pushHistory`
+- `addStatusLane(name, color?)` / `updateStatusLane(id, patch)` / `removeStatusLane(id)` / `reorderStatusLane(id, dir)` — manage `blueprint.statusLanes`. `updateStatusLane` patch can include `{ name, color, visible, order }`. `removeStatusLane` re-numbers `order` on remaining lanes. All call `pushHistory`.
+- `addStatusSegment(laneId, startCol, endCol, label?)` / `updateStatusSegment(laneId, segmentId, patch)` / `removeStatusSegment(laneId, segmentId)` — segment CRUD for a status lane. Segments are clamped at render time if their cols exceed the current `totalColumns`. Patch typically `{ label, startCol, endCol, color }`.
+- `addTimelineLane`, `updateTimelineLane`, `removeTimelineLane`, `reorderTimelineLane` — same shape as status lane equivalents, on `blueprint.timelineLanes`.
+- `addTimelineSegment`, `updateTimelineSegment`, `removeTimelineSegment` — same shape as status segment equivalents.
 - `generateOverview()` — calls Claude API to select representative actions (`overviewActionIds`) and generate `labelAbstract` per action; then calls `setOverviewMode(true)`
 - `setStoryboardMode(on)` — enters/exits Journey Map view; exits present/compare/overview modes
 - `createStoryboard(name)`, `deleteStoryboard(id)`, `setActiveStoryboard(id)`
@@ -446,7 +473,8 @@ Bootstraps from LocalStorage on module import.
 | Top-left | ProjectBar | Blueprint name (editable inline, click to edit); project switcher chevron |
 | Top-left (below ProjectBar) | VersionBar | "Current" (editable, double-click) + named version pills, fork (+), delete (×), Compare button; positioned `top: 56, left: 16` |
 | Top-centre | ModeBar | Blueprints (Map icon) / Personas (Users icon, stub) / Journey Maps (Film icon → storyboardMode); no Present tab — Present is accessed via ViewBar dropdown |
-| Top-right | ViewBar | Dropdown (pill + chevron, styled like ProjectBar): Edit / Pains / Opportunities / Questions / Status + divider + Present; label shows 'Presenting' when in presentation context |
+| Top-right | ViewBar | Dropdown (pill + chevron, styled like ProjectBar): Edit / Pains / Opportunities / Questions + divider + Present; label shows 'Presenting' when in presentation context |
+| Top-right (left of ViewBar) | LanesPanel | "Lanes" pill button (Layers icon, count badge); opens dropdown with two sections — Timelines and Statuses — each with add button + per-lane row (color swatch, name, ↑↓ reorder, eye visibility toggle, delete) |
 | Left | NodeInspector | Opens on action click (normal mode); slides in from left; `App.tsx` renders `<OverviewInspector />` instead when `overviewMode && selectedOverviewCell` |
 | Left | OverviewInspector | Replaces NodeInspector in overview mode; opens on action card click; editable `labelAbstract` + AI cell description; TabBar: Steps / Pains / Opps / Questions (cell-aggregated) |
 | Left | ActorPanel | Opens on actor label click; slides in from left; mutually exclusive with NodeInspector |
@@ -480,14 +508,25 @@ A phase can be marked conditional (`phase.conditional = true`) via a toggle in `
 - `conditionLabel?: string` — optional descriptive text set in PhaseInspector; appears in the badge as "IF: …"
 - `updatePhase` accepts `conditional` and `conditionLabel` in its patch type
 
-### Service statuses
-`blueprint.statuses` is a named vocabulary of `ServiceStatus` items (id, label, color). Actions can carry a `statusTransition` linking two statuses (from→to).
+### Status & timeline lanes
+Status and timeline lanes live OUTSIDE the actor swimlane region — they are independent horizontal tracks that snap to the same column grid as actions.
 
-- **Status view** (`canvasView === 'status'`): accessed via ViewBar dropdown; highlights action cards that have a `statusTransition`; uses the `toStatus.color` for the card tint/glow
-- **StatusPanel** (right-side panel when Status view active): lists all statuses with inline CRUD (add, double-click to rename, delete); below a divider, lists all actions that have a transition (phase + action name + from→to labels)
-- **Action card badge**: when `statusTransition` is set, a small pill at the bottom of the card shows `{from} → {to}` with status colors
-- **NodeInspector Details tab**: `StatusTransitionSection` — two `<select>` dropdowns (from / to); a "Clear transition" link when either is set; shows hint text if no statuses defined yet
-- `removeStatus` cascades: clears `statusTransition` references across all actions that pointed to the deleted status
+- **Status lanes** render *between* the phase header and the first actor swimlane. Each visible lane is one row at `STATUS_LANE_HEIGHT (56px)`. Use case: tracking a status that progresses across the journey (e.g. "Public status: Available → Booked").
+- **Timeline lanes** render *above* the phase header. Each visible lane is one row at `TIMELINE_LANE_HEIGHT (44px)`. Use case: durations between steps (e.g. "48 hours" with a dotted line spanning columns).
+
+Each lane has `visible: boolean` — when `false`, the lane is omitted entirely from layout and the canvas reflows. Toggle via the LanesPanel eye icon or the canvas-side label hover button.
+
+**Segments** are anchored by `(startCol, endCol)` inclusive on the global column index. Width = `(endCol - startCol + 1) * PHASE_WIDTH`. At render time segments are clamped to `[0, totalColumns - 1]`, so phase deletion never crashes — just visually clips.
+
+**Status segment**: rounded pill with a 1.5px border in the lane color and a centered editable label. Drag body to move (snaps to columns); drag left/right edges to resize; double-click label to rename; hover-only × deletes.
+
+**Timeline segment**: dot–dotted-line–dot pattern with the duration label centered above the line on a `--surface-bg` background. Same drag/resize/rename interactions.
+
+**`laneBody` node** spans the full lane row beneath segments. Hovering shows a column highlight + `+` icon at the cursor's column; clicking adds a single-column segment at that position via `addStatusSegment` / `addTimelineSegment`.
+
+**Lane management** is done in the floating LanesPanel (top-right, left of the ViewBar): two sections (Timelines, Statuses), each with an Add button and per-lane row (color swatch, editable name, reorder ↑/↓, visibility toggle, delete).
+
+**Overview mode** hides all lanes (`computeLaneOffsets` returns empty arrays when `isOverview` is true) — the simplified zoom focuses on representative steps only.
 
 ### Confirmation modal (`ConfirmDeleteModal`)
 All destructive delete actions show a `ConfirmDeleteModal` before executing. Applies to: deleting a step (NodeInspector), deleting an actor (ActorPanel), deleting a named version (VersionBar), deleting a presentation (SlidePanel), and deleting an individual slide (SlidePanel keyframe strip). The modal renders at `z-index: 9000` with a Trash2 icon, title, description, Cancel, and Delete buttons.
@@ -550,6 +589,7 @@ Decouples viewport control from React component hierarchy; works from any non-Re
 - Shows "Current" pill (the base blueprint) + one pill per named version; active version is highlighted
 - Double-clicking "Current" opens an inline input that calls `renameBlueprint` on commit — renames the blueprint
 - "+" button opens an inline input to name and create a new version (forks from current active state)
+- Double-clicking a named version pill opens an inline input that calls `renameVersion(versionId, name)` on commit
 - "×" appears on hover over any non-base version pill; shows `ConfirmDeleteModal` before deleting that version
 - "Compare" button appears only when at least one named version exists
 
@@ -714,6 +754,19 @@ app/src/
 | "Exit compare" in SplitCanvas | Closes SplitCanvas; returns to regular canvas |
 | Click blueprint title in ProjectBar | Inline input → `renameBlueprint` on commit |
 | Switch view to Pains/Opps/Questions | `fitView({ padding: 0.12, duration: 700 })` to show full canvas |
+| Click "Lanes" pill (top-right) | Opens LanesPanel dropdown with Timelines + Statuses sections |
+| Click "+ Add" in a LanesPanel section | Creates a new lane (default name + cycled color) with `visible: true` |
+| Click eye icon on lane row | Toggles `lane.visible` — hidden lanes are removed from layout |
+| Click ↑/↓ on lane row | Reorders lane up/down within its kind (status or timeline) |
+| Click trash on lane row | Deletes the lane and renumbers remaining lanes' `order` |
+| Hover lane label on canvas | Reveals eye + delete buttons inline |
+| Double-click lane label on canvas | Inline rename of lane name |
+| Hover empty lane area on canvas | Shows column highlight at cursor — preview of where a new segment will land |
+| Click empty lane area on canvas | Creates a single-column segment at that column |
+| Drag segment body | Moves segment — snaps to whole columns; clamps to `[0, totalColumns-1]` |
+| Drag segment left/right edge | Resizes segment by adjusting `startCol` or `endCol` (snaps to columns) |
+| Double-click segment | Inline edit of segment label |
+| Hover segment | Shows × delete button at top-right corner |
 | Click theme toggle (bottom-left) | `toggleTheme`; persisted to localStorage |
 | Reorder actor row or phase column | Non-moving nodes animate to new positions (`transform 320ms ease-in-out`) |
 | Click "Add slide" in SlidePanel | Captures current viewport + `activeVersionId` + `canvasView` + `selectedNodeId` (if inspector open) + `compareMode`/`compareVersionIds`; appends as a new `PresentationKeyframe` |
@@ -808,7 +861,7 @@ Template at `app/.env.example` (committed, no values).
 | React state for handle hover visibility | Causes the card wrapper to intercept mouse events — CSS-only approach required |
 | `position: relative` wrapper on ActionNode | Handles at card edges intercept mousedown, hijacking node drag — reverted to fragment |
 | Version edge data (edgeMeta/customEdges per version) | Edges are shared across versions; per-version edge customisation deferred |
-| Named version rename in VersionBar | Only create/delete supported for named versions; rename deferred. Base version LABEL ('Current') is renameable via 'Current' pill (`renameBaseVersion`). Blueprint NAME is renameable via ProjectBar title (`renameBlueprint`). These are distinct. |
+| `?? []` inside Zustand selectors | Creates a new array reference on every render. Zustand 5 wraps inline selectors in `useCallback`, so the `getSnapshot` changes every render; React 19's `useSyncExternalStore` tearing-check sees `Object.is([], []) === false` and schedules another synchronous re-render → infinite loop → error #185. Always place `?? []` / `?? {}` **outside** the selector: `useBlueprintStore((s) => s.x?.y) ?? []`. |
 | Divider between media and badge pills on action card | Removed — media flows directly into badge area with spacing only |
 | Fixed row heights (ROW_HEIGHT / ROW_HEIGHT_MEDIA as actuals) | Replaced by `estimateActionHeight`-based dynamic row heights that expand to fit content |
 | Inline transition style on nodes from layout.ts | CSS class rules in global.css are more reliable for ReactFlow wrapper transforms; inline used only to suppress (transition: none) on cursor-following nodes |
@@ -828,3 +881,4 @@ Template at `app/.env.example` (committed, no values).
 | ReactFlow `selected` prop for ActionNode highlight | Replaced by store-derived `selectedNodeId === action.id`; ReactFlow's prop only updates on pointer interaction and lags behind programmatic navigation |
 | Arrow key node movement (ReactFlow default) | Disabled via `disableKeyboardA11y={true}` on `<ReactFlow>`; cards are grid-constrained and should never be nudged by keyboard |
 | DB-generated share tokens via `encode(gen_random_bytes(24), 'base64url')` | Supabase's PostgreSQL does not support the `base64url` encoding — token generated client-side via `crypto.getRandomValues` and passed explicitly on insert |
+| Per-action `Action.statusTransition` field + `Blueprint.statuses` vocabulary + `'status'` canvasView + `StatusPanel` + status badge on action card + `StatusTransitionSection` in NodeInspector | Replaced by independent `statusLanes` (and `timelineLanes`) above/below the actor region. Status is now a horizontal track that snaps to the column grid, independent of any specific action — better matches how blueprints actually visualise status changes spanning multiple steps. The old per-action transition coupled status data to a single cell, which couldn't represent "available throughout phase X". |

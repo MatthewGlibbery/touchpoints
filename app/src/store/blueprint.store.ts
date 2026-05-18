@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { Node, Edge } from '@xyflow/react';
-import type { Blueprint, BlueprintVersion, Action, Actor, Phase, PainPoint, Opportunity, Question, EdgeMeta, CustomEdge, Presentation, PresentationKeyframe, Storyboard, StoryboardFrame, StoryboardStyleGuide, ServiceStatus } from '../types/blueprint';
+import type { Blueprint, BlueprintVersion, Action, Actor, Phase, PainPoint, Opportunity, Question, EdgeMeta, CustomEdge, Presentation, PresentationKeyframe, Storyboard, StoryboardFrame, StoryboardStyleGuide, StatusLane, TimelineLane, LaneSegment } from '../types/blueprint';
 import { generateStyleGuide, generateFrameStructure, buildImagePrompt, generateImage } from '../lib/storyboard';
 import { blueprintToFlow, computeColumnData, getBlueprintForVersion, ACTION_NODE_WIDTH, estimateActionHeight } from '../lib/layout';
 import { saveBlueprint, loadBlueprint, loadAllBlueprints, switchBlueprint, fetchBlueprintsFromCloud, migrateLocalBlueprints, importBlueprintsToCloud } from '../lib/storage';
@@ -10,7 +10,7 @@ import { getSession, onAuthStateChange, signOut as authSignOut } from '../lib/au
 import { supabase } from '../lib/supabase';
 
 type AppMode = 'onboarding' | 'canvas' | 'auth';
-type CanvasView = 'edit' | 'pain-points' | 'opportunities' | 'questions' | 'status';
+type CanvasView = 'edit' | 'pain-points' | 'opportunities' | 'questions';
 
 type DragTarget = { actorId: string; phaseId: string; order: number };
 type ActorDragOffset = { actorId: string; offsetY: number };
@@ -215,10 +215,34 @@ type AppState = {
   undo: () => void;
   redo: () => void;
 
-  // Statuses
-  addStatus: (label: string, color: string) => void;
-  updateStatus: (id: string, patch: Partial<Pick<ServiceStatus, 'label' | 'color'>>) => void;
-  removeStatus: (id: string) => void;
+  // Status lanes
+  addStatusLane: (name: string, color?: string) => void;
+  updateStatusLane: (id: string, patch: Partial<Pick<StatusLane, 'name' | 'color' | 'visible' | 'order'>>) => void;
+  removeStatusLane: (id: string) => void;
+  reorderStatusLane: (id: string, direction: 'up' | 'down') => void;
+  addStatusSegment: (laneId: string, startCol: number, endCol: number, label?: string) => void;
+  updateStatusSegment: (laneId: string, segmentId: string, patch: Partial<LaneSegment>) => void;
+  removeStatusSegment: (laneId: string, segmentId: string) => void;
+
+  // Timeline lanes
+  addTimelineLane: (name: string, color?: string) => void;
+  updateTimelineLane: (id: string, patch: Partial<Pick<TimelineLane, 'name' | 'color' | 'visible' | 'order'>>) => void;
+  removeTimelineLane: (id: string) => void;
+  reorderTimelineLane: (id: string, direction: 'up' | 'down') => void;
+  addTimelineSegment: (laneId: string, startCol: number, endCol: number, label?: string) => void;
+  updateTimelineSegment: (laneId: string, segmentId: string, patch: Partial<LaneSegment>) => void;
+  removeTimelineSegment: (laneId: string, segmentId: string) => void;
+
+  // Lane segment selection + drag
+  selectedLaneSegmentId: string | null;
+  setSelectedLaneSegment: (id: string | null) => void;
+  removeSelectedLaneSegment: () => void;  // Backspace/Delete handler
+  beginLaneDrag: () => void;  // Pushes one history entry; subsequent live updates are silent.
+  applyLaneDrag: (
+    laneId: string,
+    kind: 'status' | 'timeline',
+    patches: Record<string, Partial<LaneSegment>>
+  ) => void;  // Applies multiple segment patches in one go without pushHistory.
 };
 
 // Returns a blueprint filtered to only overview actions, with substep columns collapsed.
@@ -402,6 +426,7 @@ export const useBlueprintStore = create<AppState>()(
       lightboxUrl: null,
       dragOverInserterId: null,
       selectedColumnKey: null,
+      selectedLaneSegmentId: null,
       multiSelectedNodeIds: [],
       overviewMode: false,
       overviewGenerating: false,
@@ -1526,49 +1551,229 @@ export const useBlueprintStore = create<AppState>()(
         apply(updatedAt({ ...blueprint, baseVersionName: trimmed }));
       },
 
-      // ─── Statuses ──────────────────────────────────────────────────────────
+      // ─── Status lanes ──────────────────────────────────────────────────────
 
-      addStatus: (label, color) => {
+      addStatusLane: (name, color) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const id = `status-${Date.now()}`;
-        apply(updatedAt({ ...blueprint, statuses: [...(blueprint.statuses ?? []), { id, label, color }] }));
+        const lanes = blueprint.statusLanes ?? [];
+        const palette = ['#3B82F6', '#14B8A6', '#F59E0B', '#8B5CF6', '#EC4899', '#10B981'];
+        const lane: StatusLane = {
+          id: `slane-${Date.now()}`,
+          name,
+          color: color ?? palette[lanes.length % palette.length],
+          order: lanes.length,
+          visible: true,
+          segments: [],
+        };
+        apply(updatedAt({ ...blueprint, statusLanes: [...lanes, lane] }));
       },
 
-      updateStatus: (id, patch) => {
+      updateStatusLane: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        apply(updatedAt({ ...blueprint, statuses: (blueprint.statuses ?? []).map((s) => s.id === id ? { ...s, ...patch } : s) }));
+        const lanes = (blueprint.statusLanes ?? []).map((l) => l.id === id ? { ...l, ...patch } : l);
+        apply(updatedAt({ ...blueprint, statusLanes: lanes }));
       },
 
-      removeStatus: (id) => {
+      removeStatusLane: (id) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const eff = vRead();
-        // Clear transitions that reference this status
-        const cleanedBp = updatedAt(vWrite({
-          ...blueprint,
-          statuses: (blueprint.statuses ?? []).filter((s) => s.id !== id),
-        }, {
-          actions: eff.actions.map((a) => {
-            if (!a.statusTransition) return a;
-            const { fromStatusId, toStatusId } = a.statusTransition;
-            if (fromStatusId !== id && toStatusId !== id) return a;
-            const cleaned = {
-              fromStatusId: fromStatusId === id ? null : fromStatusId,
-              toStatusId: toStatusId === id ? null : toStatusId,
-            };
-            if (cleaned.fromStatusId == null && cleaned.toStatusId == null) {
-              const { statusTransition: _, ...rest } = a;
-              return rest;
-            }
-            return { ...a, statusTransition: cleaned };
-          }),
-        }));
-        apply(cleanedBp);
+        const lanes = (blueprint.statusLanes ?? [])
+          .filter((l) => l.id !== id)
+          .map((l, i) => ({ ...l, order: i }));
+        apply(updatedAt({ ...blueprint, statusLanes: lanes }));
+      },
+
+      reorderStatusLane: (id, direction) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const sorted = [...(blueprint.statusLanes ?? [])].sort((a, b) => a.order - b.order);
+        const idx = sorted.findIndex((l) => l.id === id);
+        if (idx === -1) return;
+        const swap = direction === 'up' ? idx - 1 : idx + 1;
+        if (swap < 0 || swap >= sorted.length) return;
+        pushHistory();
+        [sorted[idx], sorted[swap]] = [sorted[swap], sorted[idx]];
+        const reordered = sorted.map((l, i) => ({ ...l, order: i }));
+        apply(updatedAt({ ...blueprint, statusLanes: reordered }));
+      },
+
+      addStatusSegment: (laneId, startCol, endCol, label) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const lane = (blueprint.statusLanes ?? []).find((l) => l.id === laneId);
+        if (!lane) return;
+        // Skip if any column in the requested range overlaps an existing segment
+        const overlaps = lane.segments.some((s) => !(endCol < s.startCol || startCol > s.endCol));
+        if (overlaps) return;
+        pushHistory();
+        const seg: LaneSegment = { id: `sseg-${Date.now()}`, label: label ?? '', startCol, endCol };
+        const lanes = (blueprint.statusLanes ?? []).map((l) =>
+          l.id === laneId ? { ...l, segments: [...l.segments, seg] } : l
+        );
+        apply(updatedAt({ ...blueprint, statusLanes: lanes }));
+      },
+
+      updateStatusSegment: (laneId, segmentId, patch) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+        const lanes = (blueprint.statusLanes ?? []).map((l) =>
+          l.id === laneId
+            ? { ...l, segments: l.segments.map((s) => s.id === segmentId ? { ...s, ...patch } : s) }
+            : l
+        );
+        apply(updatedAt({ ...blueprint, statusLanes: lanes }));
+      },
+
+      removeStatusSegment: (laneId, segmentId) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+        const lanes = (blueprint.statusLanes ?? []).map((l) =>
+          l.id === laneId ? { ...l, segments: l.segments.filter((s) => s.id !== segmentId) } : l
+        );
+        apply(updatedAt({ ...blueprint, statusLanes: lanes }));
+      },
+
+      // ─── Timeline lanes ────────────────────────────────────────────────────
+
+      addTimelineLane: (name, color) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+        const lanes = blueprint.timelineLanes ?? [];
+        const lane: TimelineLane = {
+          id: `tlane-${Date.now()}`,
+          name,
+          color: color ?? '#6B7280',
+          order: lanes.length,
+          visible: true,
+          segments: [],
+        };
+        apply(updatedAt({ ...blueprint, timelineLanes: [...lanes, lane] }));
+      },
+
+      updateTimelineLane: (id, patch) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+        const lanes = (blueprint.timelineLanes ?? []).map((l) => l.id === id ? { ...l, ...patch } : l);
+        apply(updatedAt({ ...blueprint, timelineLanes: lanes }));
+      },
+
+      removeTimelineLane: (id) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+        const lanes = (blueprint.timelineLanes ?? [])
+          .filter((l) => l.id !== id)
+          .map((l, i) => ({ ...l, order: i }));
+        apply(updatedAt({ ...blueprint, timelineLanes: lanes }));
+      },
+
+      reorderTimelineLane: (id, direction) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const sorted = [...(blueprint.timelineLanes ?? [])].sort((a, b) => a.order - b.order);
+        const idx = sorted.findIndex((l) => l.id === id);
+        if (idx === -1) return;
+        const swap = direction === 'up' ? idx - 1 : idx + 1;
+        if (swap < 0 || swap >= sorted.length) return;
+        pushHistory();
+        [sorted[idx], sorted[swap]] = [sorted[swap], sorted[idx]];
+        const reordered = sorted.map((l, i) => ({ ...l, order: i }));
+        apply(updatedAt({ ...blueprint, timelineLanes: reordered }));
+      },
+
+      addTimelineSegment: (laneId, startCol, endCol, label) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const lane = (blueprint.timelineLanes ?? []).find((l) => l.id === laneId);
+        if (!lane) return;
+        const overlaps = lane.segments.some((s) => !(endCol < s.startCol || startCol > s.endCol));
+        if (overlaps) return;
+        pushHistory();
+        const seg: LaneSegment = { id: `tseg-${Date.now()}`, label: label ?? '', startCol, endCol };
+        const lanes = (blueprint.timelineLanes ?? []).map((l) =>
+          l.id === laneId ? { ...l, segments: [...l.segments, seg] } : l
+        );
+        apply(updatedAt({ ...blueprint, timelineLanes: lanes }));
+      },
+
+      updateTimelineSegment: (laneId, segmentId, patch) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+        const lanes = (blueprint.timelineLanes ?? []).map((l) =>
+          l.id === laneId
+            ? { ...l, segments: l.segments.map((s) => s.id === segmentId ? { ...s, ...patch } : s) }
+            : l
+        );
+        apply(updatedAt({ ...blueprint, timelineLanes: lanes }));
+      },
+
+      removeTimelineSegment: (laneId, segmentId) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+        const lanes = (blueprint.timelineLanes ?? []).map((l) =>
+          l.id === laneId ? { ...l, segments: l.segments.filter((s) => s.id !== segmentId) } : l
+        );
+        apply(updatedAt({ ...blueprint, timelineLanes: lanes }));
+      },
+
+      // ─── Lane segment selection + live drag ────────────────────────────────
+
+      setSelectedLaneSegment: (id) => set({ selectedLaneSegmentId: id }),
+
+      removeSelectedLaneSegment: () => {
+        const { blueprint, selectedLaneSegmentId } = get();
+        if (!blueprint || !selectedLaneSegmentId) return;
+        // Look up the segment in either statusLanes or timelineLanes
+        for (const lane of (blueprint.statusLanes ?? [])) {
+          if (lane.segments.some((s) => s.id === selectedLaneSegmentId)) {
+            get().removeStatusSegment(lane.id, selectedLaneSegmentId);
+            set({ selectedLaneSegmentId: null });
+            return;
+          }
+        }
+        for (const lane of (blueprint.timelineLanes ?? [])) {
+          if (lane.segments.some((s) => s.id === selectedLaneSegmentId)) {
+            get().removeTimelineSegment(lane.id, selectedLaneSegmentId);
+            set({ selectedLaneSegmentId: null });
+            return;
+          }
+        }
+      },
+
+      beginLaneDrag: () => {
+        // One history entry captures the pre-drag state; subsequent live
+        // updates during the drag bypass pushHistory so undo restores
+        // the original in a single step.
+        pushHistory();
+      },
+
+      applyLaneDrag: (laneId, kind, patches) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const key = kind === 'status' ? 'statusLanes' : 'timelineLanes';
+        const lanes = (blueprint[key] ?? []).map((l) => {
+          if (l.id !== laneId) return l;
+          return {
+            ...l,
+            segments: l.segments.map((s) => {
+              const patch = patches[s.id];
+              return patch ? { ...s, ...patch } : s;
+            }),
+          };
+        });
+        // apply() recomputes layout + saves; we skip pushHistory.
+        apply(updatedAt({ ...blueprint, [key]: lanes }));
       },
 
       // ─── Overview / semantic zoom ───────────────────────────────────────────

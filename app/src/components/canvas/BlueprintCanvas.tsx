@@ -12,7 +12,7 @@ import { nodeTypes } from './nodeTypes';
 import { ConfirmDeleteModal } from '../ui/ConfirmDeleteModal';
 
 import { useBlueprintStore } from '../../store/blueprint.store';
-import { getCellFromPosition, ACTION_NODE_WIDTH, ACTION_NODE_HEIGHT, estimateActionHeight, ACTOR_LABEL_WIDTH, PHASE_WIDTH, PHASE_HEADER_HEIGHT, computeColumnData, computeActorRowHeights } from '../../lib/layout';
+import { getCellFromPosition, ACTION_NODE_WIDTH, ACTION_NODE_HEIGHT, estimateActionHeight, ACTOR_LABEL_WIDTH, PHASE_WIDTH, computeColumnData, computeActorRowHeights, computeLaneOffsets } from '../../lib/layout';
 import { registerViewport } from '../../lib/viewportBridge';
 
 export function BlueprintCanvas() {
@@ -26,6 +26,7 @@ export function BlueprintCanvas() {
   const setDraggingNode = useBlueprintStore((s) => s.setDraggingNode);
   const setSelectedEdge = useBlueprintStore((s) => s.setSelectedEdge);
   const setSelectedColumnKey = useBlueprintStore((s) => s.setSelectedColumnKey);
+  const setSelectedLaneSegment = useBlueprintStore((s) => s.setSelectedLaneSegment);
   const setSelectedPhase = useBlueprintStore((s) => s.setSelectedPhase);
   const setDragOverInserterId = useBlueprintStore((s) => s.setDragOverInserterId);
   const insertSubstep = useBlueprintStore((s) => s.insertSubstep);
@@ -89,13 +90,14 @@ export function BlueprintCanvas() {
       // Detect proximity to column inserter boundaries (within 15px of boundary x)
       const SNAP_RANGE = 15;
       const { phaseColumns } = computeColumnData(blueprint);
+      const { actorRegionY } = computeLaneOffsets(blueprint, false);
       let foundInserterId: string | null = null;
       for (const [phaseId, { startCol, colCount }] of phaseColumns) {
         for (let order = 0; order <= colCount; order++) {
           const boundaryX = ACTOR_LABEL_WIDTH + (startCol + order) * PHASE_WIDTH;
           if (Math.abs(cx - boundaryX) < SNAP_RANGE) {
             // Verify y is in the canvas body (not header)
-            if (cy > PHASE_HEADER_HEIGHT) {
+            if (cy > actorRegionY) {
               foundInserterId = `inserter-${phaseId}-${order}`;
             }
             break;
@@ -124,7 +126,8 @@ export function BlueprintCanvas() {
       const { dragOverInserterId: currentOverId } = useBlueprintStore.getState();
       setDragOverInserterId(null);
 
-      if (currentOverId && cy > PHASE_HEADER_HEIGHT) {
+      const { actorRegionY: dropActorY } = computeLaneOffsets(blueprint, false);
+      if (currentOverId && cy > dropActorY) {
         // Parse inserter id: "inserter-{phaseId}-{order}"
         const parts = currentOverId.split('-');
         const atOrder = parseInt(parts[parts.length - 1], 10);
@@ -137,7 +140,7 @@ export function BlueprintCanvas() {
           let targetActorId = sortedActors[0]?.id ?? '';
           for (const actor of sortedActors) {
             const h = rowHeights.get(actor.id) ?? 200;
-            if (cy - PHASE_HEADER_HEIGHT >= cumY && cy - PHASE_HEADER_HEIGHT < cumY + h) {
+            if (cy - dropActorY >= cumY && cy - dropActorY < cumY + h) {
               targetActorId = actor.id;
               break;
             }
@@ -249,9 +252,10 @@ export function BlueprintCanvas() {
     setSelectedNode(null);
     setSelectedEdge(null);
     setSelectedColumnKey(null);
+    setSelectedLaneSegment(null);
     setSelectedPhase(null);
     clearOverviewCell();
-  }, [canvasView, setCanvasView, setSelectedNode, setSelectedEdge, setSelectedColumnKey, setSelectedPhase, clearOverviewCell]);
+  }, [canvasView, setCanvasView, setSelectedNode, setSelectedEdge, setSelectedColumnKey, setSelectedLaneSegment, setSelectedPhase, clearOverviewCell]);
 
   const displayNodes = useMemo(() => {
     const EDITING = ['emptyCell', 'columnInserter', 'columnOverlay', 'phaseBoundary', 'phaseAdder', 'actorAdder'];

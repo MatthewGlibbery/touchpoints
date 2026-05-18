@@ -2,18 +2,38 @@
 
 ## Current Objective
 
-All planned sessions (A through AJ) complete. App stable and deployed to Vercel. No active session.
+**Session AK: Status & timeline lanes** — replace the per-action `statusTransition` field with independent horizontal *lanes* that snap to the column grid.
 
-### Post-AJ: Production bug fix — React error #185 (two rounds)
+### Done in this session
+- New types: `StatusLane`, `TimelineLane`, `LaneSegment` on `Blueprint` (`statusLanes?`, `timelineLanes?`).
+- Layout regions (`computeLaneOffsets`):
+  - Timeline lanes stack above the phase header (`TIMELINE_LANE_HEIGHT = 44px` each).
+  - Status lanes stack between the phase header and the first actor row (`STATUS_LANE_HEIGHT = 56px` each).
+  - Hidden lanes (`visible: false`) collapse out of layout entirely.
+  - Overview mode hides both regions.
+- New ReactFlow node types (`app/src/components/canvas/nodes/LaneNodes.tsx`):
+  - `statusLaneLabel`, `timelineLaneLabel` — label cells in the left column with rename/visibility/delete on hover.
+  - `laneBody` — full-width click-to-add-segment overlay with hovered-column preview.
+  - `statusSegment` — pill-style segment (drag to move, drag edges to resize, double-click to rename, × to delete).
+  - `timelineSegment` — dot–dotted-line–dot pattern with the duration label centered above the line.
+- Store: `addStatusLane`, `updateStatusLane`, `removeStatusLane`, `reorderStatusLane`, `addStatusSegment`, `updateStatusSegment`, `removeStatusSegment` (plus the timeline equivalents). All routed through `pushHistory`.
+- New floating UI: `LanesPanel` (top-right, left of ViewBar) with two sections (Timelines, Statuses) — add, rename, color-pick, reorder, hide, delete.
+- Removed old status system entirely:
+  - `Action.statusTransition` and `Blueprint.statuses` types
+  - `addStatus`/`updateStatus`/`removeStatus` store actions
+  - `'status'` canvasView and `StatusPanel`
+  - Status badge on `ActionNode`
+  - `StatusTransitionSection` in `NodeInspector`
+- Updated `getCellFromPosition` and `BlueprintCanvas` drop hit-testing to use `actorRegionY` (was hardcoded `PHASE_HEADER_HEIGHT`).
+- Spec.md + working.md updated. Old status system added to Non-Goals (§14) with rationale.
 
-**Round 1** (prior commit): added `!userId` guard to `getSession().then()` + `INITIAL_SESSION` handling + `_isBootstrapping` boolean. Partially fixed but re-appeared.
+### Migration note
+Existing blueprints in storage that still have `statuses` and `actions[].statusTransition` fields will load fine — the data is JSON-permissive. The fields are simply unused. Lane data starts empty.
 
-**Round 2** (current): replaced `_isBootstrapping` boolean with a **`_bootPromise` singleton** hoisted to module scope.
-- **Root cause (refined)**: `_isBootstrapping` reset to `false` after boot completed. If Supabase fired `SIGNED_OUT` mid-boot (resetting `userId` to null) then `SIGNED_IN` immediately after (e.g. token refresh), the `!userId` guard was bypassed and a second `completeBoot` ran after the first had already finished — two `setBlueprint` calls cascading into 25+ re-renders.
-- **Fix** (`blueprint.store.ts`):
-  - `_bootPromise: Promise<void> | null` at module scope — first call starts boot, all subsequent calls return same promise regardless of timing
-  - `signOut` action and `SIGNED_OUT` event handler both reset `_bootPromise = null` so next login boots fresh
-  - Error path in `completeBoot` also resets `_bootPromise = null` to allow retry
+### Followups (not done)
+- Auto-fix segments when phases are deleted (currently they clamp at render but `startCol`/`endCol` data isn't updated).
+- Confirmation modal for lane deletion (deletes are direct; user didn't request a confirm step).
+- Per-segment color override UI (color falls back to lane color; segments support an optional `color` field but no UI exposes it yet).
 
 ---
 
@@ -39,26 +59,20 @@ GitHub repo (`https://github.com/MatthewGlibbery/touchpoints`, public). Style pr
 - **Guest mode**: `GuestNamePrompt`, read-only canvas, guest can add pains/opps/questions → `guest_comments` table; owner loads contributions automatically
 
 ### Session AI: Final Features
-- **Undo/redo**: 50-level stack (`undoStack`/`redoStack`), `pushHistory` at all mutation sites (38 call sites), Cmd+Z / Cmd+Shift+Z (blocked in inputs)
-- **Guest UI fix**: ModeBar + ViewBar visible in guest view; owner-only UI remains gated
-- **Conditional phases**: `conditional` + `conditionLabel` on Phase; amber dashed styling on PhaseHeaderNode + ColumnOverlayNode; toggle + label input in PhaseInspector
-- **Service statuses**: `ServiceStatus` vocabulary, `StatusTransition` on actions, Status view + StatusPanel, status badge on action cards, `StatusTransitionSection` in NodeInspector Details tab
-
-### Post-launch bug fixes (commit `602830c`)
-- **Guest comments blank**: fixed with local draft state in NodeInspector — `addGuest*` only called on textarea blur with non-empty text.
-- **Auth: magic link flow**: replaced 6-box OTP UI with a "Check your email" screen.
-- **fitView on storyboard exit**: `requestAnimationFrame(() => instance.fitView(...))` in `onInit`.
-- **Type fix**: `'status'` added to `PresentationKeyframe.canvasView` union.
-- **Resend spam**: URL mismatch is a Supabase infrastructure limit (requires Pro custom domain). Check Outlook Junk as workaround.
+- **Undo/redo**: 50-level stack
+- **Guest UI fix**: ModeBar + ViewBar visible in guest view
+- **Conditional phases**: amber dashed phase styling
+- **Service statuses** (REPLACED in AK): per-action `statusTransition` + `blueprint.statuses` vocabulary
 
 ### Session AJ: Backlog (commit `2ea27ff`)
-- **New project state cleanup**: `startFromScratch()` now resets `storyboardMode`, `compareVersionIds`, and all UI flags.
-- **Named version rename**: double-click any named version pill in VersionBar → inline edit → `renameVersion(versionId, name)`.
-- **Semantic zoom in SplitCanvas**: Details/Overview toggle in SplitCanvas top bar; local state, independent of main canvas; triggers `generateOverview()` if needed, auto-enables on completion.
-- **AI actor portraits**: `portraitUrl?` on Actor; `generateActorPortrait(actorId)` store action; `actorPortraitGenerating` state; ActorPanel shows portrait with floating Regenerate, or Generate placeholder.
-- **ErrorBoundary** in `main.tsx` wrapping App — friendly crash screen with Reload button.
-- **Canvas bg fix**: `background: 'var(--canvas-bg)'` on root div prevents flash on load.
-- **setUser bootstrap**: wrapped in try/catch; falls back to onboarding on error.
+- New project state cleanup, named version rename, semantic zoom in SplitCanvas, AI actor portraits, ErrorBoundary, canvas bg fix, setUser bootstrap.
+
+### Post-AJ: Production bug fixes
+- **React error #185 (commit `de2d388`)**: `ActionNode` selector `s.blueprint?.statuses ?? []` created a new array reference every render → `useSyncExternalStore` infinite loop. Fixed by moving `?? []` outside the selector. (Note: AK removed `statuses` entirely, so this selector is gone — the lesson lives on in spec §7 as the selector-purity rule.)
+- **Auth boot double-fire**: `_bootPromise` singleton.
+
+### Session AK: Status & timeline lanes
+See "Done in this session" above.
 
 ---
 
@@ -103,8 +117,8 @@ create table guest_comments (
 
 ---
 
----
-
 ## Future Backlog
 
 - **Real-time collaboration** — enable Supabase Realtime on `blueprints` table; no schema changes needed (schema has `updated_at`/`updated_by` ready)
+- **Auto-clamp lane segments on phase delete** — currently segments may reference deleted columns; render clamps but data drifts
+- **Per-segment color override UI** — segments already support `color?` field; add picker

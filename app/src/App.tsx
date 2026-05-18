@@ -17,6 +17,7 @@ import { DebugPanel } from './components/ui/DebugPanel';
 import { SlidePanel } from './components/ui/SlidePanel';
 import { PresentationControls } from './components/ui/PresentationControls';
 import { OverviewInspector } from './components/ui/OverviewInspector';
+import { LanesPanel } from './components/ui/LanesPanel';
 import { Sun, Moon } from 'lucide-react';
 import { GuestNamePrompt } from './components/auth/GuestNamePrompt';
 
@@ -43,13 +44,25 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const meta = e.metaKey || e.ctrlKey;
-      if (!meta) return;
       const target = e.target as HTMLElement;
       const inInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
       if (inInput) return;
-      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
-      if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redo(); }
+
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta) {
+        if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+        if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redo(); }
+        return;
+      }
+
+      // Backspace/Delete removes the currently selected lane segment
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        const id = useBlueprintStore.getState().selectedLaneSegmentId;
+        if (id) {
+          e.preventDefault();
+          useBlueprintStore.getState().removeSelectedLaneSegment();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -94,6 +107,7 @@ export default function App() {
                 <>
                   <ProjectBar />
                   <VersionBar />
+                  <LanesPanel />
                   {overviewMode && selectedOverviewCell ? <OverviewInspector /> : <NodeInspector />}
                   <ActorPanel />
                   <PhaseInspector />

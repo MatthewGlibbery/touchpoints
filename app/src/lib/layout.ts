@@ -21,6 +21,12 @@ export const ROW_HEIGHT_MEDIA = 300;
 export const H_CELL_PAD = Math.round((PHASE_WIDTH - ACTION_NODE_WIDTH) / 2);  // 30 — horizontal centering
 export const V_CELL_PAD = Math.round((ROW_HEIGHT - ACTION_NODE_HEIGHT) / 2);  // 30 — vertical centering
 export const OVERVIEW_CARD_HEIGHT = 56;  // fixed card height for overview mode nodes
+
+// Lane rows: timeline lanes live above phase headers, status lanes live below
+// phase headers and above the first actor swimlane. Each visible lane occupies
+// one fixed-height row.
+export const TIMELINE_LANE_HEIGHT = 44;
+export const STATUS_LANE_HEIGHT = 56;
 /** @deprecated use H_CELL_PAD / V_CELL_PAD */
 export const CELL_PADDING = H_CELL_PAD;
 
@@ -88,6 +94,38 @@ export function computeColumnData(blueprint: Blueprint): {
 
 // ─── Main layout ──────────────────────────────────────────────────────────────
 
+// Lane visibility: in overview mode, lanes are hidden to keep the simplified
+// view focused on representative steps only.
+function visibleStatusLanes(blueprint: Blueprint, isOverview: boolean) {
+  if (isOverview) return [];
+  return [...(blueprint.statusLanes ?? [])]
+    .filter((l) => l.visible !== false)
+    .sort((a, b) => a.order - b.order);
+}
+
+function visibleTimelineLanes(blueprint: Blueprint, isOverview: boolean) {
+  if (isOverview) return [];
+  return [...(blueprint.timelineLanes ?? [])]
+    .filter((l) => l.visible !== false)
+    .sort((a, b) => a.order - b.order);
+}
+
+export function computeLaneOffsets(blueprint: Blueprint, isOverview: boolean) {
+  const tLanes = visibleTimelineLanes(blueprint, isOverview);
+  const sLanes = visibleStatusLanes(blueprint, isOverview);
+  const timelineRegionHeight = tLanes.length * TIMELINE_LANE_HEIGHT;
+  const statusRegionHeight = sLanes.length * STATUS_LANE_HEIGHT;
+  return {
+    tLanes,
+    sLanes,
+    timelineRegionHeight,
+    statusRegionHeight,
+    phaseHeaderY: timelineRegionHeight,
+    statusRegionY: timelineRegionHeight + PHASE_HEADER_HEIGHT,
+    actorRegionY: timelineRegionHeight + PHASE_HEADER_HEIGHT + statusRegionHeight,
+  };
+}
+
 export function blueprintToFlow(
   blueprint: Blueprint,
   opts?: { overviewMode?: boolean }
@@ -110,6 +148,128 @@ export function blueprintToFlow(
   const { offsets: actorYOffsets, totalHeight: totalCanvasHeight } = computeActorYOffsets(sortedActors, rowHeights);
   const totalCanvasWidth = totalColumns * PHASE_WIDTH;
 
+  const lanes = computeLaneOffsets(blueprint, isOverview);
+  const PHASE_Y = lanes.phaseHeaderY;
+  const ACTOR_REGION_Y = lanes.actorRegionY;
+
+  // ─── Timeline lane rows (above phase headers) ─────────────────────────────
+  lanes.tLanes.forEach((lane, i) => {
+    const laneY = i * TIMELINE_LANE_HEIGHT;
+    // Lane label (left column)
+    nodes.push({
+      id: `tlane-label-${lane.id}`,
+      type: 'timelineLaneLabel',
+      position: { x: 0, y: laneY },
+      data: { lane, height: TIMELINE_LANE_HEIGHT },
+      draggable: false, selectable: false, zIndex: 5,
+      style: { pointerEvents: 'all' },
+    });
+    // Lane body (canvas-spanning click target for adding segments)
+    nodes.push({
+      id: `tlane-body-${lane.id}`,
+      type: 'laneBody',
+      position: { x: ACTOR_LABEL_WIDTH, y: laneY },
+      data: {
+        laneId: lane.id,
+        kind: 'timeline' as const,
+        width: totalCanvasWidth,
+        height: TIMELINE_LANE_HEIGHT,
+        totalColumns,
+        segments: lane.segments,
+      },
+      draggable: false, selectable: false, zIndex: 1,
+      style: { pointerEvents: 'all' },
+    });
+    // Segments
+    lane.segments.forEach((seg) => {
+      const startCol = Math.max(0, Math.min(seg.startCol, totalColumns - 1));
+      const endCol = Math.max(startCol, Math.min(seg.endCol, totalColumns - 1));
+      const x = ACTOR_LABEL_WIDTH + startCol * PHASE_WIDTH;
+      const w = (endCol - startCol + 1) * PHASE_WIDTH;
+      nodes.push({
+        id: `tseg-${seg.id}`,
+        type: 'timelineSegment',
+        position: { x, y: laneY },
+        data: {
+          segment: seg,
+          laneId: lane.id,
+          kind: 'timeline' as const,
+          color: seg.color ?? lane.color,
+          width: w,
+          height: TIMELINE_LANE_HEIGHT,
+          totalColumns,
+          siblings: lane.segments.filter((s) => s.id !== seg.id),
+        },
+        draggable: false, selectable: false, zIndex: 10,
+        style: { pointerEvents: 'all' },
+      });
+    });
+  });
+
+  // ─── Phase headers ────────────────────────────────────────────────────────
+  sortedPhases.forEach((phase) => {
+    const col = phaseColumns.get(phase.id)!;
+    nodes.push({
+      id: `phase-${phase.id}`,
+      type: 'phaseHeader',
+      position: { x: ACTOR_LABEL_WIDTH + col.startCol * PHASE_WIDTH, y: PHASE_Y },
+      data: { phase, width: col.colCount * PHASE_WIDTH, colCount: col.colCount },
+      draggable: false, selectable: false,
+      style: { pointerEvents: 'all' },
+    });
+  });
+
+  // ─── Status lane rows (below phase headers, above actors) ─────────────────
+  lanes.sLanes.forEach((lane, i) => {
+    const laneY = lanes.statusRegionY + i * STATUS_LANE_HEIGHT;
+    nodes.push({
+      id: `slane-label-${lane.id}`,
+      type: 'statusLaneLabel',
+      position: { x: 0, y: laneY },
+      data: { lane, height: STATUS_LANE_HEIGHT },
+      draggable: false, selectable: false, zIndex: 5,
+      style: { pointerEvents: 'all' },
+    });
+    nodes.push({
+      id: `slane-body-${lane.id}`,
+      type: 'laneBody',
+      position: { x: ACTOR_LABEL_WIDTH, y: laneY },
+      data: {
+        laneId: lane.id,
+        kind: 'status' as const,
+        width: totalCanvasWidth,
+        height: STATUS_LANE_HEIGHT,
+        totalColumns,
+        segments: lane.segments,
+      },
+      draggable: false, selectable: false, zIndex: 1,
+      style: { pointerEvents: 'all' },
+    });
+    lane.segments.forEach((seg) => {
+      const startCol = Math.max(0, Math.min(seg.startCol, totalColumns - 1));
+      const endCol = Math.max(startCol, Math.min(seg.endCol, totalColumns - 1));
+      const x = ACTOR_LABEL_WIDTH + startCol * PHASE_WIDTH;
+      const w = (endCol - startCol + 1) * PHASE_WIDTH;
+      nodes.push({
+        id: `sseg-${seg.id}`,
+        type: 'statusSegment',
+        position: { x, y: laneY },
+        data: {
+          segment: seg,
+          laneId: lane.id,
+          kind: 'status' as const,
+          color: seg.color ?? lane.color,
+          width: w,
+          height: STATUS_LANE_HEIGHT,
+          totalColumns,
+          siblings: lane.segments.filter((s) => s.id !== seg.id),
+        },
+        draggable: false, selectable: false, zIndex: 10,
+        style: { pointerEvents: 'all' },
+      });
+    });
+  });
+
   // ─── Swimlane backgrounds ─────────────────────────────────────────────────
   sortedActors.forEach((actor, i) => {
     const rowH = rowHeights.get(actor.id) ?? ROW_HEIGHT;
@@ -117,7 +277,7 @@ export function blueprintToFlow(
     nodes.push({
       id: `swimlane-${actor.id}`,
       type: 'swimlane',
-      position: { x: ACTOR_LABEL_WIDTH, y: PHASE_HEADER_HEIGHT + actorY },
+      position: { x: ACTOR_LABEL_WIDTH, y: ACTOR_REGION_Y + actorY },
       data: { color: actor.color, width: totalCanvasWidth, height: rowH, even: i % 2 === 0 },
       draggable: false, selectable: false, zIndex: -1,
     });
@@ -131,25 +291,12 @@ export function blueprintToFlow(
       nodes.push({
         id: `coloverlay-${phase.id}-${order}`,
         type: 'columnOverlay',
-        position: { x: ACTOR_LABEL_WIDTH + colIndex * PHASE_WIDTH, y: PHASE_HEADER_HEIGHT },
+        position: { x: ACTOR_LABEL_WIDTH + colIndex * PHASE_WIDTH, y: ACTOR_REGION_Y },
         data: { phaseId: phase.id, order, colCount: col.colCount, height: totalCanvasHeight, conditional: phase.conditional ?? false },
         draggable: false, selectable: false, zIndex: 0,
         style: { pointerEvents: 'all' },
       });
     }
-  });
-
-  // ─── Phase headers ────────────────────────────────────────────────────────
-  sortedPhases.forEach((phase) => {
-    const col = phaseColumns.get(phase.id)!;
-    nodes.push({
-      id: `phase-${phase.id}`,
-      type: 'phaseHeader',
-      position: { x: ACTOR_LABEL_WIDTH + col.startCol * PHASE_WIDTH, y: 0 },
-      data: { phase, width: col.colCount * PHASE_WIDTH, colCount: col.colCount },
-      draggable: false, selectable: false,
-      style: { pointerEvents: 'all' },
-    });
   });
 
   // ─── Actor labels ─────────────────────────────────────────────────────────
@@ -159,7 +306,7 @@ export function blueprintToFlow(
     nodes.push({
       id: `actor-${actor.id}`,
       type: 'actorLabel',
-      position: { x: 0, y: PHASE_HEADER_HEIGHT + actorY },
+      position: { x: 0, y: ACTOR_REGION_Y + actorY },
       data: { actor, height: rowH },
       draggable: false, selectable: false,
       style: { pointerEvents: 'all' },
@@ -182,7 +329,7 @@ export function blueprintToFlow(
 
     const colIndex = col.startCol + action.order;
     const x = ACTOR_LABEL_WIDTH + colIndex * PHASE_WIDTH + H_CELL_PAD;
-    const y = PHASE_HEADER_HEIGHT + actorY + vPad;
+    const y = ACTOR_REGION_Y + actorY + vPad;
 
     occupiedCells.add(`${action.actorId}:${action.phaseId}:${action.order}`);
 
@@ -214,7 +361,7 @@ export function blueprintToFlow(
           type: 'emptyCell',
           position: {
             x: ACTOR_LABEL_WIDTH + colIndex * PHASE_WIDTH + H_CELL_PAD,
-            y: PHASE_HEADER_HEIGHT + actorY + vPad,
+            y: ACTOR_REGION_Y + actorY + vPad,
           },
           data: { actorId: actor.id, phaseId: phase.id, order, actorColor: actor.color },
           draggable: false, selectable: false, zIndex: 0,
@@ -225,11 +372,16 @@ export function blueprintToFlow(
   });
 
   // ─── Column inserters (between sub-steps within a phase) ──────────────────
-  // Line spans from top of first card row to bottom of last card row
-  const NODE_Y = 4;
-  const LINE_ROW_PAD = 30; // top/bottom padding within each row (half of V_PAD=60)
-  const lineStart = PHASE_HEADER_HEIGHT - NODE_Y + LINE_ROW_PAD;
-  const lineEnd   = PHASE_HEADER_HEIGHT + totalCanvasHeight - LINE_ROW_PAD - NODE_Y;
+  // Inserter node is constrained to the actor region only — it must NOT extend
+  // into the timeline or status lane regions, since those have their own
+  // interactions (segment edge resize, lane body click-to-add).
+  const NODE_PAD = 4;        // a few px of slop above/below for hit area
+  const LINE_ROW_PAD = 30;   // top/bottom padding within each row (half of V_PAD=60)
+  const inserterTop = ACTOR_REGION_Y - NODE_PAD;
+  const inserterHeight = totalCanvasHeight + NODE_PAD * 2;
+  // Line is drawn relative to the node's internal coordinate frame
+  const lineStart = NODE_PAD + LINE_ROW_PAD;
+  const lineEnd   = inserterHeight - NODE_PAD - LINE_ROW_PAD;
   sortedPhases.forEach((phase) => {
     const col = phaseColumns.get(phase.id)!;
     // One inserter for each boundary: before col 0, between each pair, after last
@@ -238,11 +390,11 @@ export function blueprintToFlow(
       nodes.push({
         id: `inserter-${phase.id}-${order}`,
         type: 'columnInserter',
-        position: { x: x - 12, y: NODE_Y },
+        position: { x: x - 12, y: inserterTop },
         data: {
           phaseId: phase.id,
           atOrder: order,
-          canvasHeight: totalCanvasHeight + PHASE_HEADER_HEIGHT,
+          canvasHeight: inserterHeight,
           lineStart,
           lineEnd,
         },
@@ -256,7 +408,7 @@ export function blueprintToFlow(
   nodes.push({
     id: 'add-phase-btn',
     type: 'phaseAdder',
-    position: { x: ACTOR_LABEL_WIDTH + totalColumns * PHASE_WIDTH + 12, y: 8 },
+    position: { x: ACTOR_LABEL_WIDTH + totalColumns * PHASE_WIDTH + 12, y: PHASE_Y + 8 },
     data: {},
     draggable: false, selectable: false, zIndex: 25,
     style: { pointerEvents: 'all' },
@@ -266,7 +418,7 @@ export function blueprintToFlow(
   nodes.push({
     id: 'add-actor-btn',
     type: 'actorAdder',
-    position: { x: 0, y: PHASE_HEADER_HEIGHT + totalCanvasHeight + 4 },
+    position: { x: 0, y: ACTOR_REGION_Y + totalCanvasHeight + 4 },
     data: {},
     draggable: false, selectable: false, zIndex: 25,
     style: { pointerEvents: 'all' },
@@ -281,13 +433,13 @@ export function blueprintToFlow(
     nodes.push({
       id: `boundary-${left.id}-${right.id}`,
       type: 'phaseBoundary',
-      position: { x: boundaryX - 8, y: 0 },
+      position: { x: boundaryX - 8, y: PHASE_Y },
       data: {
         leftPhaseId: left.id,
         rightPhaseId: right.id,
-        canvasHeight: totalCanvasHeight + PHASE_HEADER_HEIGHT,
+        canvasHeight: totalCanvasHeight + ACTOR_REGION_Y - PHASE_Y,
       },
-      draggable: false, selectable: false, zIndex: 25,
+      draggable: false, selectable: false, zIndex: 5,
       style: { pointerEvents: 'all' },
     });
   }
@@ -423,6 +575,7 @@ export function getCellFromPosition(
   const sortedActors = [...blueprint.actors].sort((a, b) => a.order - b.order);
   const rowHeights = computeActorRowHeights(blueprint);
   const { phaseColumns, totalColumns } = computeColumnData(blueprint);
+  const lanes = computeLaneOffsets(blueprint, false);
 
   const colIndex = Math.floor((x - ACTOR_LABEL_WIDTH) / PHASE_WIDTH);
   if (colIndex < 0 || colIndex >= totalColumns) return null;
@@ -438,7 +591,7 @@ export function getCellFromPosition(
   }
   if (!foundPhaseId) return null;
 
-  const relY = y - PHASE_HEADER_HEIGHT;
+  const relY = y - lanes.actorRegionY;
   let cumY = 0;
   let foundActorId: string | null = null;
   for (const actor of sortedActors) {
@@ -453,4 +606,23 @@ export function getCellFromPosition(
   if (!foundActorId) return null;
 
   return { actorId: foundActorId, phaseId: foundPhaseId, order: foundOrder };
+}
+
+// Convert a canvas X coordinate to the column index (0-based, clamped) the
+// cursor is currently INSIDE. Used for hit-testing (e.g. lane body click-to-add).
+export function getColFromX(x: number, totalColumns: number): number {
+  const col = Math.floor((x - ACTOR_LABEL_WIDTH) / PHASE_WIDTH);
+  if (col < 0) return 0;
+  if (col >= totalColumns) return totalColumns - 1;
+  return col;
+}
+
+// Convert a canvas X coordinate to the NEAREST column whose center is closest
+// to the cursor. Used for symmetric resize/move snapping — crossing the center
+// of the next column commits the change in either direction.
+export function getColFromXSnap(x: number, totalColumns: number): number {
+  const col = Math.round((x - ACTOR_LABEL_WIDTH - PHASE_WIDTH / 2) / PHASE_WIDTH);
+  if (col < 0) return 0;
+  if (col >= totalColumns) return totalColumns - 1;
+  return col;
 }

@@ -25,17 +25,6 @@ export type ActionMedia = {
   caption?: string;
 };
 
-export type StatusTransition = {
-  fromStatusId?: string | null;
-  toStatusId?: string | null;
-};
-
-export type ServiceStatus = {
-  id: string;
-  label: string;
-  color: string;
-};
-
 export type Action = {
   id: string;
   actorId: string;
@@ -51,7 +40,6 @@ export type Action = {
   order: number;
   tags?: string[];
   media?: ActionMedia[];
-  statusTransition?: StatusTransition;
 };
 
 export type Question = {
@@ -109,7 +97,7 @@ export type PresentationKeyframe = {
   label?: string;
   viewport: { x: number; y: number; zoom: number };
   versionId?: string | null;
-  canvasView?: 'edit' | 'pain-points' | 'opportunities' | 'questions' | 'status';
+  canvasView?: 'edit' | 'pain-points' | 'opportunities' | 'questions';
   selectedNodeId?: string | null;
   compareMode?: boolean;
   compareVersionIds?: [string | null, string | null];
@@ -155,6 +143,43 @@ export type Storyboard = {
   updatedAt: string;
 };
 
+// ─── Lanes (status + timeline) ─────────────────────────────────────────────────
+// A lane is a horizontal track that lives outside the actor swimlane region.
+// Status lanes live below the phase header and above the first actor row.
+// Timeline lanes live above the phase header. Each lane contains segments that
+// span one or more substep columns on the existing phase grid.
+//
+// Segments are anchored by absolute column index (`startCol` inclusive →
+// `endCol` inclusive). Column indices are global across all phases — the same
+// indexing used by `computeColumnData(blueprint).phaseColumns` (`startCol`).
+// Width on canvas = (endCol - startCol + 1) * PHASE_WIDTH.
+
+export type LaneSegment = {
+  id: string;
+  label: string;
+  startCol: number;            // inclusive
+  endCol: number;              // inclusive (>= startCol)
+  color?: string;              // optional override (otherwise inherits lane.color)
+};
+
+export type StatusLane = {
+  id: string;
+  name: string;
+  color: string;               // label colour + segment accent
+  order: number;               // top-to-bottom order among status lanes
+  visible: boolean;            // toggle to show/hide
+  segments: LaneSegment[];
+};
+
+export type TimelineLane = {
+  id: string;
+  name: string;
+  color: string;
+  order: number;
+  visible: boolean;
+  segments: LaneSegment[];     // segment label is the duration text e.g. "48 hours"
+};
+
 export type Blueprint = {
   id: string;
   name: string;
@@ -176,7 +201,8 @@ export type Blueprint = {
   overviewActionIds?: string[];  // IDs of actions selected for semantic overview zoom
   overviewCellDescriptions?: Record<string, string>;  // key = "${actorId}-${phaseId}"
   storyboards?: Storyboard[];
-  statuses?: ServiceStatus[];
+  statusLanes?: StatusLane[];
+  timelineLanes?: TimelineLane[];
   createdAt: string;
   updatedAt: string;
 };

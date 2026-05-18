@@ -8,6 +8,13 @@ import { ColumnOverlayNode } from './nodes/ColumnOverlayNode';
 import { PhaseBoundaryNode } from './nodes/PhaseBoundaryNode';
 import { PhaseAdderNode } from './nodes/PhaseAdderNode';
 import { ActorAdderNode } from './nodes/ActorAdderNode';
+import {
+  StatusLaneLabelNode,
+  TimelineLaneLabelNode,
+  LaneBodyNode,
+  StatusSegmentNode,
+  TimelineSegmentNode,
+} from './nodes/LaneNodes';
 
 export const nodeTypes = {
   phaseHeader: PhaseHeaderNode,
@@ -20,4 +27,9 @@ export const nodeTypes = {
   phaseBoundary: PhaseBoundaryNode,
   phaseAdder: PhaseAdderNode,
   actorAdder: ActorAdderNode,
+  statusLaneLabel: StatusLaneLabelNode,
+  timelineLaneLabel: TimelineLaneLabelNode,
+  laneBody: LaneBodyNode,
+  statusSegment: StatusSegmentNode,
+  timelineSegment: TimelineSegmentNode,
 };

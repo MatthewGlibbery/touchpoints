@@ -1,6 +1,6 @@
 import { memo, useState, useRef, useCallback } from 'react';
 import type { NodeProps } from '@xyflow/react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { MoveHorizontal } from 'lucide-react';
 import { useBlueprintStore } from '../../../store/blueprint.store';
 import { PHASE_HEADER_HEIGHT } from '../../../lib/layout';
 
@@ -56,7 +56,7 @@ export const PhaseBoundaryNode = memo(({ data }: NodeProps) => {
         flexDirection: 'column',
         alignItems: 'center',
         userSelect: 'none',
-        zIndex: 25,
+        zIndex: 5,
         position: 'relative',
       }}
     >
@@ -72,31 +72,24 @@ export const PhaseBoundaryNode = memo(({ data }: NodeProps) => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          cursor: dragging ? 'ew-resize' : 'col-resize',
+          cursor: 'ew-resize',
           flexShrink: 0,
         }}
       >
         <div
           style={{
-            width: 12,
-            height: 28,
-            borderRadius: 6,
+            width: visible ? 22 : 6,
+            height: visible ? 22 : 26,
+            borderRadius: visible ? '50%' : 3,
             background: visible ? 'var(--accent-primary)' : 'var(--border-strong)',
-            opacity: visible ? 1 : 0.45,
+            opacity: visible ? 1 : 0.5,
             display: 'flex',
-            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 0,
-            transition: 'background var(--transition-fast), opacity var(--transition-fast)',
+            transition: 'background var(--transition-fast), opacity var(--transition-fast), width var(--transition-fast), height var(--transition-fast), border-radius var(--transition-fast)',
           }}
         >
-          {visible && (
-            <>
-              <ChevronLeft size={8} color="#fff" style={{ marginBottom: -2 }} />
-              <ChevronRight size={8} color="#fff" style={{ marginTop: -2 }} />
-            </>
-          )}
+          {visible && <MoveHorizontal size={12} color="#fff" />}
         </div>
       </div>
 
@@ -106,7 +99,7 @@ export const PhaseBoundaryNode = memo(({ data }: NodeProps) => {
           width: visible ? 2 : 1,
           flex: 1,
           background: visible ? 'var(--accent-primary)' : 'var(--border-strong)',
-          opacity: visible ? 0.6 : 0.25,
+          opacity: visible ? 0.6 : 0.55,
           transition: 'background var(--transition-fast), opacity var(--transition-fast), width var(--transition-fast)',
           pointerEvents: 'none',
         }}
