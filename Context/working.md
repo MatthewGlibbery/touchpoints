@@ -122,3 +122,18 @@ create table guest_comments (
 - **Real-time collaboration** — enable Supabase Realtime on `blueprints` table; no schema changes needed (schema has `updated_at`/`updated_by` ready)
 - **Auto-clamp lane segments on phase delete** — currently segments may reference deleted columns; render clamps but data drifts
 - **Per-segment color override UI** — segments already support `color?` field; add picker
+
+---
+
+## Known Config Gotchas
+
+### Magic link → spam
+Magic links in OTP emails are commonly flagged as phishing by spam filters when the link's domain differs from the sender domain (and corporate scanners rewrite/strip them outright). Switched to OTP-code-only sign-in:
+- `sendOTP` no longer passes `emailRedirectTo` (so Supabase omits the link)
+- Supabase email templates must be edited to remove `{{ .ConfirmationURL }}` — keep only `{{ .Token }}` and surrounding copy
+- App already verifies via `verifyOtp({ type: 'email' })`, so no flow change
+
+### Resend sender address
+`onboarding@resend.dev` (the default Resend "from" address) only delivers to the email tied to your Resend account — any other recipient is rejected silently before Resend logs it. Symptom: Supabase shows "Error sending confirmation email" and Resend dashboard shows no activity.
+
+**Fix**: verify your own domain in Resend → Domains (add SPF/DKIM DNS records), then change Supabase → Auth → SMTP Settings → Sender email to `noreply@yourdomain.com`. Until a domain is verified, OTP sign-in only works for the Resend account owner's email.

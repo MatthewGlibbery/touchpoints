@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { sendOTP } from '../../lib/auth';
+import { sendOTP, verifyOTP } from '../../lib/auth';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { GitBranch, ArrowRight, RotateCcw, Upload, Mail } from 'lucide-react';
 
@@ -148,12 +148,15 @@ export function AuthScreen() {
 
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const emailRef = useRef<HTMLInputElement>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { emailRef.current?.focus(); }, []);
+  useEffect(() => { if (step === 'sent') codeRef.current?.focus(); }, [step]);
 
   // When the store detects blueprints to migrate, show the migration step
   useEffect(() => {
@@ -167,9 +170,10 @@ export function AuthScreen() {
     setError(null);
     try {
       await sendOTP(email.trim());
+      setCode('');
       setStep('sent');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to send link');
+      setError(err instanceof Error ? err.message : 'Failed to send code');
     } finally {
       setLoading(false);
     }
@@ -182,6 +186,25 @@ export function AuthScreen() {
       await sendOTP(email.trim());
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to resend');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleVerify(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = code.trim();
+    if (trimmed.length < 6) {
+      setError('Enter the code from your email');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await verifyOTP(email.trim(), trimmed);
+      // Auth state listener picks up the new session and routes the app
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Invalid or expired code');
     } finally {
       setLoading(false);
     }
@@ -254,7 +277,7 @@ export function AuthScreen() {
         {step === 'email' ? (
           <form onSubmit={handleEmailSubmit}>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.5 }}>
-              Enter your email to sign in or create an account. We'll send a magic link.
+              Enter your email to sign in or create an account. We'll send a verification code.
             </p>
             <div style={{ marginBottom: 12 }}>
               <input
@@ -276,7 +299,7 @@ export function AuthScreen() {
             </button>
           </form>
         ) : step === 'sent' ? (
-          <div>
+          <form onSubmit={handleVerify}>
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               width: 48, height: 48, borderRadius: '50%',
@@ -289,20 +312,43 @@ export function AuthScreen() {
               Check your email
             </p>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 4, textAlign: 'center' }}>
-              We sent a magic link to
+              We sent a verification code to
             </p>
             <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 20, textAlign: 'center' }}>
               {email}
             </p>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55, marginBottom: 20, textAlign: 'center' }}>
-              Click the link in the email to sign in. You can close this tab.
-            </p>
+
+            <input
+              ref={codeRef}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="one-time-code"
+              placeholder="Enter code"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 10))}
+              maxLength={10}
+              style={{
+                ...inputStyle,
+                marginBottom: 12,
+                textAlign: 'center',
+                fontSize: 22,
+                fontWeight: 600,
+                letterSpacing: '4px',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            />
 
             {error && (
               <p style={{ fontSize: 12, color: 'var(--accent-danger)', marginBottom: 10 }}>{error}</p>
             )}
 
+            <button type="submit" style={btnStyle} disabled={loading || code.length < 6}>
+              {loading ? 'Verifying…' : <><span>Sign in</span><ArrowRight size={14} /></>}
+            </button>
+
             <button
+              type="button"
               onClick={handleResend}
               disabled={loading}
               style={{
@@ -310,13 +356,15 @@ export function AuthScreen() {
                 background: 'var(--surface-bg-muted)',
                 color: 'var(--text-secondary)',
                 border: '1px solid var(--border-subtle)',
+                marginTop: 8,
                 marginBottom: 8,
               }}
             >
-              {loading ? 'Sending…' : 'Resend link'}
+              {loading ? 'Sending…' : 'Resend code'}
             </button>
             <button
-              onClick={() => { setStep('email'); setError(null); }}
+              type="button"
+              onClick={() => { setStep('email'); setError(null); setCode(''); }}
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
                 color: 'var(--text-muted)', fontSize: 12,
@@ -326,7 +374,7 @@ export function AuthScreen() {
             >
               <RotateCcw size={11} /> Use a different email
             </button>
-          </div>
+          </form>
         ) : step === 'migration' ? (
           <MigrationStep
             count={pendingMigration?.length ?? 0}

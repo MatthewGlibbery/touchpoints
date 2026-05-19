@@ -820,7 +820,7 @@ Stored in `app/.env.local` (gitignored via `*.local` in `app/.gitignore`).
 Template at `app/.env.example` (committed, no values).
 
 ### Supabase dashboard requirements
-- **Authentication → Email Templates**: Both "Magic Link" and "Confirm Signup" templates must include `{{ .Token }}` to surface the 6-digit OTP code
+- **Authentication → Email Templates**: Both "Magic Link" and "Confirm Signup" templates must show ONLY the 6-digit OTP code (`{{ .Token }}`) — the magic link (`{{ .ConfirmationURL }}`) must be removed. Reason: magic links with a different domain than the sender domain are commonly flagged as phishing by spam filters and rewritten/stripped by corporate email scanners. The app verifies via OTP only (`verifyOtp({ type: 'email' })`); the magic link redirect is unused, so `sendOTP` does not pass `emailRedirectTo`.
 - **Authentication → URL Configuration**: Site URL and Redirect URLs must include the deployed app URL (and `http://localhost:5173` for local dev)
 - **Authentication → SMTP**: Custom SMTP provider required to avoid Supabase free-tier rate limit (2 emails/hour per project). Resend (`smtp.resend.com:465`, username `resend`) recommended.
 - **Edge Functions deployed**: `ai-generate`, `ai-overview`, `ai-storyboard`, `get-shared-blueprint`

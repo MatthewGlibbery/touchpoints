@@ -6,7 +6,6 @@ export async function sendOTP(email: string): Promise<void> {
     email,
     options: {
       shouldCreateUser: true,
-      emailRedirectTo: window.location.origin,
     },
   });
   if (error) throw error;

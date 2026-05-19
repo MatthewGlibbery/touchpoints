@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:0;background-color:#F5F6F8;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F5F6F8;padding:40px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFFFF;border:1px solid #E5E7EB;border-radius:12px;overflow:hidden;max-width:480px;width:100%;">
+
+            <!-- Header / brand -->
+            <tr>
+              <td style="padding:32px 32px 8px 32px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td style="padding-right:10px;">
+                      <div style="width:36px;height:36px;background-color:#F97316;border-radius:8px;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:700;line-height:36px;text-align:center;">T</div>
+                    </td>
+                    <td style="font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:700;color:#0F172A;letter-spacing:-0.3px;">Touchpoints</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Body -->
+            <tr>
+              <td style="padding:24px 32px 8px 32px;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;">
+                <h1 style="margin:0 0 12px 0;font-size:22px;font-weight:700;color:#0F172A;letter-spacing:-0.4px;">Welcome — confirm your email</h1>
+                <p style="margin:0 0 24px 0;font-size:14px;line-height:1.6;color:#475569;">
+                  Enter this code in Touchpoints to finish creating your account. The code expires in 1 hour.
+                </p>
+              </td>
+            </tr>
+
+            <!-- Code block -->
+            <tr>
+              <td style="padding:0 32px 24px 32px;" align="center">
+                <div style="display:inline-block;padding:18px 28px;background-color:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;font-family:ui-monospace,Consolas,monospace;font-size:30px;font-weight:700;color:#9A3412;letter-spacing:8px;">
+                  {{ .Token }}
+                </div>
+              </td>
+            </tr>
+
+            <!-- Footnote -->
+            <tr>
+              <td style="padding:0 32px 32px 32px;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;">
+                <p style="margin:0;font-size:12px;line-height:1.6;color:#94A3B8;">
+                  If you didn't sign up for Touchpoints, you can safely ignore this email — no account will be created.
+                </p>
+              </td>
+            </tr>
+          </table>
+
+          <!-- Outer footer -->
+          <p style="margin:16px 0 0 0;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;font-size:11px;color:#94A3B8;">
+            Touchpoints · Service Blueprinting
+          </p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
