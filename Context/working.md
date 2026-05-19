@@ -74,6 +74,15 @@ GitHub repo (`https://github.com/MatthewGlibbery/touchpoints`, public). Style pr
 ### Session AK: Status & timeline lanes
 See "Done in this session" above.
 
+### Post-AK: Onboarding redesign
+- Removed the seeded "Describe the service…" assistant chat bubble (it duplicated the textarea placeholder)
+- Removed the chat-thread UI entirely; onboarding is now single-shot input → analyzing → canvas
+- New `analyzing` phase: large animated `TouchpointsLogo` (pulsing scale + sequential dot opacity pulse) with status text below, fed by `generateBlueprint`'s `onStatus` callback
+- New `OnboardingProjectSwitcher` (top-left pill, mirrors `ProjectBar` styling) with project list + sign-out — replaces the inline "Recent projects" footer list
+- Errors return to the idle input view with the textarea preserved
+- Added `logoPulse`, `logoDotPulse`, `statusFade` keyframes to `global.css`
+- OTP-only auth (Session post-AK): `AuthScreen` now has 6–10 digit code input; `sendOTP` no longer passes `emailRedirectTo`; on-brand HTML email templates committed to `Context/email-templates/`
+
 ---
 
 ## Supabase Schema
