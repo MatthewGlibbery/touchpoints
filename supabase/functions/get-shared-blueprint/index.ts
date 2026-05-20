@@ -58,12 +58,33 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Fetch comments + reactions for this blueprint so guests can SEE existing
+  // threads. Writes still require RLS-authenticated users (collaborators), so
+  // guest viewers remain read-only on the comments side.
+  const { data: commentRows } = await supabase
+    .from('comments')
+    .select('id, blueprint_id, anchor_type, anchor_id, parent_comment_id, author_user_id, author_name, author_email, body, mentions, resolved_at, resolved_by, created_at, updated_at')
+    .eq('blueprint_id', share.blueprint_id)
+    .order('created_at', { ascending: true });
+
+  const commentIds = (commentRows ?? []).map((c: { id: string }) => c.id);
+  let reactionRows: Array<{ id: string; comment_id: string; user_id: string; emoji: string; created_at: string }> = [];
+  if (commentIds.length > 0) {
+    const { data: rs } = await supabase
+      .from('comment_reactions')
+      .select('id, comment_id, user_id, emoji, created_at')
+      .in('comment_id', commentIds);
+    reactionRows = rs ?? [];
+  }
+
   return new Response(
     JSON.stringify({
       blueprint: bp.data,
       canComment: share.can_comment,
       shareId: share.id,
       blueprintRowId: share.blueprint_id,
+      comments: commentRows ?? [],
+      reactions: reactionRows,
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
   );

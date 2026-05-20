@@ -13,6 +13,10 @@ export function VersionBar() {
   const toggleCompareMode = useBlueprintStore((s) => s.toggleCompareMode);
   const setCompareVersionIds = useBlueprintStore((s) => s.setCompareVersionIds);
   const renameBaseVersion = useBlueprintStore((s) => s.renameBaseVersion);
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const isGuestView = useBlueprintStore((s) => s.isGuestView);
+  const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
+  const editLocked = commentMode || isGuestView || isCollaboratorView;
 
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState('');
@@ -49,6 +53,7 @@ export function VersionBar() {
   const baseLabel = blueprint.baseVersionName || 'Current';
 
   const handleCurrentDoubleClick = () => {
+    if (editLocked) return;
     setCurrentDraft(baseLabel);
     setEditingCurrent(true);
   };
@@ -138,6 +143,7 @@ export function VersionBar() {
             key={v.id}
             label={v.name}
             active={activeVersionId === v.id}
+            editLocked={editLocked}
             onActivate={() => switchVersion(v.id)}
             onDelete={() => deleteVersion(v.id)}
             onRename={(name) => renameVersion(v.id, name)}
@@ -169,7 +175,7 @@ export function VersionBar() {
             }}
           />
         ) : (
-          <button
+          !editLocked && <button
             onClick={() => setCreating(true)}
             title="Fork current version"
             style={{
@@ -210,12 +216,14 @@ export function VersionBar() {
 function VersionTab({
   label,
   active,
+  editLocked,
   onActivate,
   onDelete,
   onRename,
 }: {
   label: string;
   active: boolean;
+  editLocked?: boolean;
   onActivate: () => void;
   onDelete: () => void;
   onRename: (name: string) => void;
@@ -231,6 +239,7 @@ function VersionTab({
   }, [editing]);
 
   const startEdit = () => {
+    if (editLocked) return;
     setDraft(label);
     setEditing(true);
   };
@@ -297,7 +306,7 @@ function VersionTab({
         >
           {label}
         </button>
-        {hovered && (
+        {hovered && !editLocked && (
           <button
             onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
             title={`Delete "${label}"`}

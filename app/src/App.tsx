@@ -13,11 +13,12 @@ import { NodeInspector } from './components/ui/NodeInspector';
 import { ActorPanel } from './components/ui/ActorPanel';
 import { PhaseInspector } from './components/ui/PhaseInspector';
 import { EdgeInspector } from './components/ui/EdgeInspector';
-import { DebugPanel } from './components/ui/DebugPanel';
 import { SlidePanel } from './components/ui/SlidePanel';
 import { PresentationControls } from './components/ui/PresentationControls';
 import { OverviewInspector } from './components/ui/OverviewInspector';
-import { LanesPanel } from './components/ui/LanesPanel';
+import { CommentThread } from './components/ui/CommentThread';
+import { CommentFilterBar } from './components/ui/CommentFilterBar';
+import { DetachedThreadsModal } from './components/ui/DetachedThreadsModal';
 import { Sun, Moon } from 'lucide-react';
 import { GuestNamePrompt } from './components/auth/GuestNamePrompt';
 
@@ -39,6 +40,14 @@ export default function App() {
   const guestName            = useBlueprintStore((s) => s.guestName);
   const undo                 = useBlueprintStore((s) => s.undo);
   const redo                 = useBlueprintStore((s) => s.redo);
+  const commentMode          = useBlueprintStore((s) => s.commentMode);
+
+  // Toggle body class for comment-mode cursor + hover styles
+  useEffect(() => {
+    if (commentMode) document.body.classList.add('comment-mode');
+    else document.body.classList.remove('comment-mode');
+    return () => document.body.classList.remove('comment-mode');
+  }, [commentMode]);
 
   const closeLightbox = useCallback(() => setLightboxUrl(null), [setLightboxUrl]);
 
@@ -48,20 +57,86 @@ export default function App() {
       const inInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
       if (inInput) return;
 
+      const state = useBlueprintStore.getState();
+      const { commentMode: cm, isGuestView: ig, isCollaboratorView: icv } = state;
+      const lockedReadOnly = cm || ig || icv;
+
       const meta = e.metaKey || e.ctrlKey;
       if (meta) {
+        if (lockedReadOnly) return;
         if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
         if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redo(); }
         return;
       }
 
-      // Backspace/Delete removes the currently selected lane segment
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        const id = useBlueprintStore.getState().selectedLaneSegmentId;
-        if (id) {
-          e.preventDefault();
-          useBlueprintStore.getState().removeSelectedLaneSegment();
+      // Arrow-key navigation across action cards. Works in normal canvas mode;
+      // present mode is handled by PresentationControls. Skipped in storyboard /
+      // overview / compare since those have their own UIs.
+      const isArrow =
+        e.key === 'ArrowLeft' || e.key === 'ArrowRight' ||
+        e.key === 'ArrowUp'   || e.key === 'ArrowDown';
+      if (isArrow && state.mode === 'canvas' && !state.presentMode &&
+          !state.storyboardMode && !state.overviewMode && !state.compareMode &&
+          state.selectedNodeId && state.blueprint) {
+        const bp = state.blueprint;
+        const cur = bp.actions.find((a) => a.id === state.selectedNodeId);
+        if (!cur) return;
+
+        let next: { id: string } | null = null;
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          // Walk this actor's row sorted by (phase.order, action.order)
+          const row = bp.actions
+            .filter((a) => a.actorId === cur.actorId)
+            .sort((a, b) => {
+              const pa = bp.phases.find((p) => p.id === a.phaseId)?.order ?? 0;
+              const pb = bp.phases.find((p) => p.id === b.phaseId)?.order ?? 0;
+              if (pa !== pb) return pa - pb;
+              return a.order - b.order;
+            });
+          const i = row.findIndex((a) => a.id === cur.id);
+          next = e.key === 'ArrowRight' ? (row[i + 1] ?? null) : (row[i - 1] ?? null);
+        } else {
+          // Walk this column (same phase + order) sorted by actor.order
+          const col = bp.actions
+            .filter((a) => a.phaseId === cur.phaseId && a.order === cur.order)
+            .sort((a, b) => {
+              const ao = bp.actors.find((x) => x.id === a.actorId)?.order ?? 0;
+              const bo = bp.actors.find((x) => x.id === b.actorId)?.order ?? 0;
+              return ao - bo;
+            });
+          const i = col.findIndex((a) => a.id === cur.id);
+          next = e.key === 'ArrowDown' ? (col[i + 1] ?? null) : (col[i - 1] ?? null);
         }
+
+        if (next) {
+          e.preventDefault();
+          state.setSelectedNode(next.id);
+          state.animateToNode(next.id);
+        }
+        return;
+      }
+
+      if (lockedReadOnly) return;
+
+      // Backspace/Delete removes the currently selected lane segment.
+      // (Action card deletion intentionally not bound — too easy to lose work
+      // accidentally; deletion happens via the inspector's confirm dialog.)
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        if (state.selectedLaneSegmentId) {
+          e.preventDefault();
+          state.removeSelectedLaneSegment();
+        }
+      }
+
+      // Escape closes the most-recently-opened inspector, then clears the
+      // column / multi-select if no inspector was open.
+      if (e.key === 'Escape') {
+        if (state.inspectorOpen) state.setInspectorOpen(false);
+        else if (state.actorPanelOpen) state.setSelectedActor(null);
+        else if (state.phaseInspectorOpen) state.setSelectedPhase(null);
+        else if (state.edgeInspectorOpen) state.setSelectedEdge(null);
+        else if (state.selectedColumnKey) state.setSelectedColumnKey(null);
+        else if (state.multiSelectedNodeIds.length > 0) state.setMultiSelectedNodeIds([]);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -107,7 +182,6 @@ export default function App() {
                 <>
                   <ProjectBar />
                   <VersionBar />
-                  <LanesPanel />
                   {overviewMode && selectedOverviewCell ? <OverviewInspector /> : <NodeInspector />}
                   <ActorPanel />
                   <PhaseInspector />
@@ -135,8 +209,6 @@ export default function App() {
 
           {/* ── Playback controls — visible regardless of compare mode ── */}
           {presentMode && <PresentationControls />}
-
-          <DebugPanel />
         </>
       )}
 
@@ -164,6 +236,15 @@ export default function App() {
       >
         {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
       </button>
+
+      {/* ── Comment thread popover (mode-agnostic) ── */}
+      <CommentThread />
+
+      {/* ── Comment filter bar (visible only in comment mode) ── */}
+      <CommentFilterBar />
+
+      {/* ── Detached threads modal ── */}
+      <DetachedThreadsModal />
 
       {/* ── Global lightbox ── */}
       {lightboxUrl && (

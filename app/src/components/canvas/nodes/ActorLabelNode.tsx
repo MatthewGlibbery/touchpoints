@@ -4,6 +4,8 @@ import { GripVertical } from 'lucide-react';
 import type { Actor } from '../../../types/blueprint';
 import { ACTOR_LABEL_WIDTH } from '../../../lib/layout';
 import { useBlueprintStore } from '../../../store/blueprint.store';
+import { useCommentsStore } from '../../../store/comments.store';
+import { CommentBadge } from '../../ui/CommentBadge';
 
 type ActorLabelData = { actor: Actor; height: number };
 
@@ -14,6 +16,15 @@ export const ActorLabelNode = memo(({ data }: NodeProps) => {
   const setActorDragOffset = useBlueprintStore((s) => s.setActorDragOffset);
   const actorDragOffset = useBlueprintStore((s) => s.actorDragOffset);
   const presentMode = useBlueprintStore((s) => s.presentMode);
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const openThread = useCommentsStore((s) => s.openThread);
+  const labelRef = useRef<HTMLDivElement>(null);
+  const labelRightPos = useCallback((): { x: number; y: number } | null => {
+    const el = labelRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.right, y: r.top + r.height / 2 };
+  }, []);
 
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -22,7 +33,7 @@ export const ActorLabelNode = memo(({ data }: NodeProps) => {
   const threshold = height * 0.5;
 
   const onDivMouseDown = useCallback((e: React.MouseEvent) => {
-    if (presentMode) return;
+    if (presentMode || commentMode) return;
     e.stopPropagation();
     dragStartY.current = e.clientY;
     didDrag.current = false;
@@ -53,13 +64,21 @@ export const ActorLabelNode = memo(({ data }: NodeProps) => {
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [actor.id, moveActor, setActorDragOffset, threshold, presentMode]);
+  }, [actor.id, moveActor, setActorDragOffset, threshold, presentMode, commentMode]);
 
   const showGrip = hovered || dragging;
 
   return (
     <div
-      onClick={() => { if (!presentMode && !didDrag.current) setSelectedActor(actor.id); }}
+      ref={labelRef}
+      onClick={() => {
+        if (presentMode || didDrag.current) return;
+        if (commentMode) {
+          openThread({ type: 'actor', id: actor.id }, labelRightPos());
+          return;
+        }
+        setSelectedActor(actor.id);
+      }}
       onMouseEnter={() => { if (!actorDragOffset) setHovered(true); }}
       onMouseLeave={() => setHovered(false)}
       onMouseDown={onDivMouseDown}
@@ -124,6 +143,13 @@ export const ActorLabelNode = memo(({ data }: NodeProps) => {
       >
         {actor.name}
       </span>
+
+      {/* Comment badge — right edge of label */}
+      <CommentBadge
+        anchor={{ type: 'actor', id: actor.id }}
+        getAnchorPos={labelRightPos}
+        style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)' }}
+      />
     </div>
   );
 });

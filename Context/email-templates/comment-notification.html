@@ -1,0 +1,84 @@
+<!--
+  Reference template for comment-notification emails sent by the
+  `notify-comment` Supabase edge function. The function inlines this same
+  markup (TS template literal) and substitutes real values at send time.
+
+  Placeholders (substituted by the edge function, not by Supabase auth):
+    {{KIND_LABEL}}      Email subject heading, e.g. "@you mentioned"
+    {{ACTOR_NAME}}      Display name / email of the user who acted
+    {{BLUEPRINT_NAME}}  Blueprint title
+    {{ANCHOR_DESC}}     Where the comment lives, e.g. "On step 'Submit application' (Phase: Apply)"
+    {{SNIPPET}}         240-char comment body excerpt (HTML-escaped)
+    {{REACTION_EMOJI}}  Single emoji (only when KIND_LABEL is "reacted")
+    {{CTA_URL}}         Deep-link to the thread, e.g. https://app/?b=<id>&comment=<id>
+-->
+<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:0;background-color:#F5F6F8;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F5F6F8;padding:40px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFFFF;border:1px solid #E5E7EB;border-radius:12px;overflow:hidden;max-width:480px;width:100%;">
+
+            <!-- Header / brand -->
+            <tr>
+              <td style="padding:32px 32px 8px 32px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td style="padding-right:10px;">
+                      <div style="width:36px;height:36px;background-color:#F97316;border-radius:8px;color:#FFFFFF;font-size:18px;font-weight:700;line-height:36px;text-align:center;">T</div>
+                    </td>
+                    <td style="font-size:18px;font-weight:700;color:#0F172A;letter-spacing:-0.3px;">Touchpoints</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Body -->
+            <tr>
+              <td style="padding:24px 32px 4px 32px;">
+                <p style="margin:0 0 6px 0;font-size:13px;color:#94A3B8;">{{BLUEPRINT_NAME}}</p>
+                <h1 style="margin:0 0 12px 0;font-size:22px;font-weight:700;color:#0F172A;letter-spacing:-0.4px;">{{ACTOR_NAME}} {{KIND_LABEL}}</h1>
+                <p style="margin:0 0 16px 0;font-size:13px;line-height:1.6;color:#475569;">
+                  {{ANCHOR_DESC}}
+                </p>
+              </td>
+            </tr>
+
+            <!-- Snippet -->
+            <tr>
+              <td style="padding:0 32px 20px 32px;">
+                <div style="padding:14px 16px;background-color:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;font-size:14px;line-height:1.55;color:#9A3412;">
+                  {{SNIPPET}}
+                </div>
+              </td>
+            </tr>
+
+            <!-- CTA -->
+            <tr>
+              <td style="padding:0 32px 28px 32px;" align="center">
+                <a href="{{CTA_URL}}" style="display:inline-block;padding:12px 22px;background-color:#F97316;border-radius:10px;color:#FFFFFF;font-size:14px;font-weight:600;text-decoration:none;">
+                  View thread
+                </a>
+              </td>
+            </tr>
+
+            <!-- Footnote -->
+            <tr>
+              <td style="padding:0 32px 32px 32px;">
+                <p style="margin:0;font-size:12px;line-height:1.6;color:#94A3B8;">
+                  You're receiving this because you participated in this thread or were @-mentioned. Open the blueprint to manage notifications.
+                </p>
+              </td>
+            </tr>
+          </table>
+
+          <!-- Outer footer -->
+          <p style="margin:16px 0 0 0;font-size:11px;color:#94A3B8;">
+            Touchpoints · Service Blueprinting
+          </p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

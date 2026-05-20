@@ -15,6 +15,10 @@ export function ActorPanel() {
   const removeActor = useBlueprintStore((s) => s.removeActor);
   const generateActorPortrait = useBlueprintStore((s) => s.generateActorPortrait);
   const actorPortraitGenerating = useBlueprintStore((s) => s.actorPortraitGenerating);
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const isGuestView = useBlueprintStore((s) => s.isGuestView);
+  const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
+  const editLocked = commentMode || isGuestView || isCollaboratorView;
 
   const actor = blueprint?.actors.find((a) => a.id === selectedActorId) ?? null;
 
@@ -36,6 +40,7 @@ export function ActorPanel() {
   const ActorIcon = ACTOR_ICONS[actor.order % ACTOR_ICONS.length] ?? Activity;
 
   const save = (field: 'name' | 'bio' | 'goals', value: string) => {
+    if (editLocked) return;
     const trimmed = value.trim();
     const current = field === 'name' ? actor.name : actor[field] ?? '';
     if (trimmed !== current) updateActor(actor.id, { [field]: trimmed || undefined });
@@ -174,10 +179,11 @@ export function ActorPanel() {
         <FieldBlock label="Name">
           <input
             value={nameDraft}
-            onChange={(e) => setNameDraft(e.target.value)}
+            onChange={(e) => !editLocked && setNameDraft(e.target.value)}
             onBlur={() => save('name', nameDraft)}
             onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-            style={inputStyle}
+            readOnly={editLocked}
+            style={{ ...inputStyle, cursor: editLocked ? 'default' : undefined }}
           />
         </FieldBlock>
 
@@ -185,11 +191,12 @@ export function ActorPanel() {
         <FieldBlock label="Who they are">
           <textarea
             value={bioDraft}
-            onChange={(e) => setBioDraft(e.target.value)}
+            onChange={(e) => !editLocked && setBioDraft(e.target.value)}
             onBlur={() => save('bio', bioDraft)}
             placeholder="Describe this actor's role and context…"
             rows={3}
-            style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 }}
+            readOnly={editLocked}
+            style={{ ...inputStyle, resize: editLocked ? 'none' : 'vertical', lineHeight: 1.6, cursor: editLocked ? 'default' : undefined }}
           />
         </FieldBlock>
 
@@ -197,18 +204,19 @@ export function ActorPanel() {
         <FieldBlock label="Goals">
           <textarea
             value={goalsDraft}
-            onChange={(e) => setGoalsDraft(e.target.value)}
+            onChange={(e) => !editLocked && setGoalsDraft(e.target.value)}
             onBlur={() => save('goals', goalsDraft)}
             placeholder="What does this actor want to achieve?"
             rows={3}
-            style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 }}
+            readOnly={editLocked}
+            style={{ ...inputStyle, resize: editLocked ? 'none' : 'vertical', lineHeight: 1.6, cursor: editLocked ? 'default' : undefined }}
           />
         </FieldBlock>
 
       </div>
 
-      {/* Delete actor */}
-      <div style={{ padding: '0 16px 16px', flexShrink: 0 }}>
+      {/* Delete actor — hidden when edit-locked */}
+      {!editLocked && <div style={{ padding: '0 16px 16px', flexShrink: 0 }}>
         <div style={{ height: 1, background: 'var(--border-subtle)', marginBottom: 12 }} />
         <button
           onClick={() => setConfirmDelete(true)}
@@ -234,7 +242,7 @@ export function ActorPanel() {
           <Trash2 size={12} />
           Delete actor
         </button>
-      </div>
+      </div>}
     </Panel>
 
     {confirmDelete && (

@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { Node, Edge } from '@xyflow/react';
-import type { Blueprint, BlueprintVersion, Action, Actor, Phase, PainPoint, Opportunity, Question, EdgeMeta, CustomEdge, Presentation, PresentationKeyframe, Storyboard, StoryboardFrame, StoryboardStyleGuide, StatusLane, TimelineLane, LaneSegment } from '../types/blueprint';
+import type { Blueprint, BlueprintVersion, Action, Actor, Phase, PainPoint, Opportunity, Question, EdgeMeta, CustomEdge, Presentation, PresentationKeyframe, Storyboard, StoryboardFrame, StoryboardStyleGuide, StatusLane, TimelineLane, LaneSegment, CommentAnchor } from '../types/blueprint';
 import { generateStyleGuide, generateFrameStructure, buildImagePrompt, generateImage } from '../lib/storyboard';
 import { blueprintToFlow, computeColumnData, getBlueprintForVersion, ACTION_NODE_WIDTH, estimateActionHeight } from '../lib/layout';
-import { saveBlueprint, loadBlueprint, loadAllBlueprints, switchBlueprint, fetchBlueprintsFromCloud, migrateLocalBlueprints, importBlueprintsToCloud } from '../lib/storage';
+import { saveBlueprint, loadBlueprint, loadAllBlueprints, switchBlueprint, fetchBlueprintsFromCloud, migrateLocalBlueprints, importBlueprintsToCloud, getBlueprintRowId, fetchBlueprintByRowId } from '../lib/storage';
 import { centerOnPoint } from '../lib/viewportBridge';
 import { getSession, onAuthStateChange, signOut as authSignOut } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+import { useCommentsStore } from './comments.store';
 
 type AppMode = 'onboarding' | 'canvas' | 'auth';
 type CanvasView = 'edit' | 'pain-points' | 'opportunities' | 'questions';
@@ -29,6 +30,13 @@ type AppState = {
   canvasView: CanvasView;
   userId: string | null;
   userEmail: string | null;
+  // Human-friendly display name captured on first sign-in (auth.user_metadata.display_name).
+  // Used as `Comment.authorName` on post and as actor_name in notifications/emails. Falls
+  // back to email at render time when null.
+  displayName: string | null;
+  // True after sign-in if the user has no display_name set yet — AuthScreen shows the
+  // capture step until `submitDisplayName` clears it.
+  pendingNameCapture: boolean;
   pendingMigration: Blueprint[] | null;
   // Guest / share view
   isGuestView: boolean;
@@ -63,17 +71,29 @@ type AppState = {
   presentationEditMode: boolean;
   activePresentationId: string | null;
   currentKeyframeIndex: number;
+  commentMode: boolean;
+  blueprintRowId: string | null;
+  // True when the current user is viewing a blueprint they don't own (i.e.
+  // they're an accepted collaborator). Treated as edit-locked everywhere
+  // commentMode/isGuestView are.
+  isCollaboratorView: boolean;
 
   // Navigation
   setMode: (mode: AppMode) => void;
   setCanvasView: (view: CanvasView) => void;
-  setUser: (id: string, email: string) => void;
+  setUser: (id: string, email: string, displayName?: string | null) => void;
+  submitDisplayName: (name: string) => Promise<void>;
   signOut: () => Promise<void>;
   confirmMigration: () => Promise<void>;
   skipMigration: () => Promise<void>;
   setBlueprint: (blueprint: Blueprint) => void;
   loadAllBlueprints: () => Record<string, Blueprint>;
   switchToBlueprint: (id: string) => void;
+  // Load a blueprint by its DB row id (uuid). Used by deep-link navigation
+  // (?b=<rowId>) and the notifications bell when the user is a collaborator
+  // on a blueprint they don't have cached locally. If `openCommentId` is
+  // supplied, the matching thread is opened after load.
+  switchToBlueprintByRowId: (rowId: string, opts?: { openCommentId?: string }) => Promise<boolean>;
   startFromScratch: () => void;
 
   // Guest / share
@@ -120,6 +140,7 @@ type AppState = {
   updateEdgeMeta: (edgeId: string, patch: Partial<EdgeMeta>) => void;
   removeEdge: (edgeId: string) => void;
   addCustomEdge: (sourceActionId: string, targetActionId: string, sourceHandle?: string, targetHandle?: string) => void;
+  reconnectEdge: (oldEdgeId: string, sourceActionId: string, targetActionId: string, sourceHandle?: string, targetHandle?: string) => void;
 
   // Touchpoint tags
   addTouchpointTag: (name: string) => void;
@@ -137,6 +158,7 @@ type AppState = {
   openInspectorToTab: (id: string, tab: string) => void;
   clearInspectorRequestedTab: () => void;
   animateToNode: (actionId: string) => void;
+  animateToAnchor: (anchor: CommentAnchor) => void;
   setInspectorOpen: (open: boolean) => void;
   setSelectedActor: (id: string | null) => void;
   setSelectedPhase: (id: string | null) => void;
@@ -149,6 +171,7 @@ type AppState = {
   togglePresentMode: () => void;
   toggleCompareMode: () => void;
   setPresentationEditMode: (on: boolean) => void;
+  setCommentMode: (on: boolean) => void;
   setCurrentKeyframeIndex: (idx: number) => void;
   createPresentation: (name: string) => void;
   deletePresentation: (id: string) => void;
@@ -233,6 +256,12 @@ type AppState = {
   updateTimelineSegment: (laneId: string, segmentId: string, patch: Partial<LaneSegment>) => void;
   removeTimelineSegment: (laneId: string, segmentId: string) => void;
 
+  // Lane label selection (status or timeline lane). Mutually exclusive with
+  // selectedLaneSegmentId — selecting a lane clears any selected segment, and
+  // vice versa.
+  selectedLaneId: string | null;
+  setSelectedLaneId: (id: string | null) => void;
+
   // Lane segment selection + drag
   selectedLaneSegmentId: string | null;
   setSelectedLaneSegment: (id: string | null) => void;
@@ -300,6 +329,49 @@ function updatedAt(bp: Blueprint): Blueprint {
   return { ...bp, updatedAt: new Date().toISOString() };
 }
 
+// Remap lane segments after a contiguous range of columns is deleted from the
+// global phase grid. Segments entirely inside the deleted range are dropped;
+// segments straddling the boundary are clamped; segments after the range shift
+// left by `dCount`.
+function remapSegmentsForColumnDelete(
+  segments: LaneSegment[],
+  dStart: number,
+  dCount: number,
+): LaneSegment[] {
+  if (dCount <= 0) return segments;
+  const dEnd = dStart + dCount - 1;
+  const out: LaneSegment[] = [];
+  for (const seg of segments) {
+    const s = seg.startCol;
+    const e = seg.endCol;
+    if (e < dStart) { out.push(seg); continue; }
+    if (s > dEnd) { out.push({ ...seg, startCol: s - dCount, endCol: e - dCount }); continue; }
+    if (s >= dStart && e <= dEnd) continue; // entirely inside — drop
+    const newStart = s < dStart ? s : dStart;
+    const newEnd = e > dEnd ? e - dCount : dStart - 1;
+    if (newEnd < newStart) continue;
+    out.push({ ...seg, startCol: newStart, endCol: newEnd });
+  }
+  return out;
+}
+
+function applyLaneRemap(
+  bp: Blueprint,
+  dStart: number,
+  dCount: number,
+): Pick<Blueprint, 'statusLanes' | 'timelineLanes'> {
+  return {
+    statusLanes: (bp.statusLanes ?? []).map((l) => ({
+      ...l,
+      segments: remapSegmentsForColumnDelete(l.segments, dStart, dCount),
+    })),
+    timelineLanes: (bp.timelineLanes ?? []).map((l) => ({
+      ...l,
+      segments: remapSegmentsForColumnDelete(l.segments, dStart, dCount),
+    })),
+  };
+}
+
 // Singleton promise for the post-auth boot sequence. Hoisted to module scope so both
 // the store's signOut action and the module-level SIGNED_OUT handler can reset it.
 let _bootPromise: Promise<void> | null = null;
@@ -346,6 +418,28 @@ export const useBlueprintStore = create<AppState>()(
       if (_bootPromise) return _bootPromise;
       _bootPromise = (async () => {
         try {
+          // Deep-link: ?b=<rowId>&comment=<commentId> — load that specific
+          // blueprint (works for owned + collaborator-shared rows) and open
+          // the linked comment thread. Strip the params so a refresh doesn't
+          // re-trigger the navigation.
+          const params = new URLSearchParams(window.location.search);
+          const deepBp = params.get('b');
+          const deepComment = params.get('comment');
+          if (deepBp) {
+            const ok = await get().switchToBlueprintByRowId(deepBp, {
+              openCommentId: deepComment ?? undefined,
+            });
+            // Clean the URL regardless of success
+            params.delete('b');
+            params.delete('comment');
+            const remaining = params.toString();
+            const newUrl =
+              window.location.pathname + (remaining ? `?${remaining}` : '');
+            window.history.replaceState({}, '', newUrl);
+            if (ok) return;
+            // Fall through to default loading on failure
+          }
+
           const all = await fetchBlueprintsFromCloud();
           const bps = Object.values(all).sort(
             (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -366,6 +460,26 @@ export const useBlueprintStore = create<AppState>()(
         }
       })();
       return _bootPromise;
+    };
+
+    // Resolve the blueprints DB row id (different from blueprint.data.id) and
+    // ask the comments store to load comments/reactions/collaborators.
+    // No-op for guest views — RLS blocks anon reads on those tables.
+    const loadCommentsForBlueprint = (dataId: string) => {
+      const { isGuestView, userId } = get();
+      if (isGuestView) return;
+      (async () => {
+        try {
+          const rowId = await getBlueprintRowId(dataId);
+          if (!rowId) return;
+          // Bail if the active blueprint changed mid-flight.
+          if (get().blueprint?.id !== dataId) return;
+          set({ blueprintRowId: rowId });
+          await useCommentsStore.getState().loadAll(rowId, userId);
+        } catch (e) {
+          console.error('[comments] loadCommentsForBlueprint:', e);
+        }
+      })();
     };
 
     // Push current blueprint to undo stack before a mutation; clears redo stack
@@ -390,6 +504,8 @@ export const useBlueprintStore = create<AppState>()(
       canvasView: 'edit',
       userId: null,
       userEmail: null,
+      displayName: null,
+      pendingNameCapture: false,
       pendingMigration: null,
       isGuestView: false,
       guestCanComment: false,
@@ -423,9 +539,13 @@ export const useBlueprintStore = create<AppState>()(
       presentationEditMode: false,
       activePresentationId: null,
       currentKeyframeIndex: 0,
+      commentMode: false,
+      blueprintRowId: null,
+      isCollaboratorView: false,
       lightboxUrl: null,
       dragOverInserterId: null,
       selectedColumnKey: null,
+      selectedLaneId: null,
       selectedLaneSegmentId: null,
       multiSelectedNodeIds: [],
       overviewMode: false,
@@ -460,14 +580,18 @@ export const useBlueprintStore = create<AppState>()(
         apply(next);
       },
 
-      setCanvasView: (canvasView) => set({ canvasView }),
+      setCanvasView: (canvasView) => {
+        if (get().commentMode) get().setCommentMode(false);
+        set({ canvasView });
+      },
 
       setBlueprint: (blueprint) => {
         const versionId = blueprint.activeVersionId ?? null;
         const effectiveBp = getBlueprintForVersion(blueprint, versionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         saveBlueprint(blueprint);
-        set({ blueprint, rfNodes: nodes, rfEdges: edges, mode: 'canvas', activeVersionId: versionId, overviewMode: false });
+        set({ blueprint, rfNodes: nodes, rfEdges: edges, mode: 'canvas', activeVersionId: versionId, overviewMode: false, blueprintRowId: null, commentMode: false, isCollaboratorView: false });
+        loadCommentsForBlueprint(blueprint.id);
       },
 
       loadAllBlueprints: () => loadAllBlueprints(),
@@ -508,9 +632,24 @@ export const useBlueprintStore = create<AppState>()(
         });
       },
 
-      setUser: (userId, userEmail) => {
-        set({ userId, userEmail });
-        // Async bootstrap: check for migration, then load from cloud
+      setUser: (userId, userEmail, displayName = null) => {
+        const trimmedName = (displayName ?? '').trim();
+        set({
+          userId,
+          userEmail,
+          displayName: trimmedName ? trimmedName : null,
+          pendingNameCapture: !trimmedName,
+        });
+        // Notifications are user-scoped (not blueprint-scoped) — load as soon
+        // as we know the userId so the bell badge is correct on the auth/
+        // onboarding screens.
+        useCommentsStore.getState().loadNotifications(userId);
+        // Async bootstrap: capture display name first (if missing), then migration, then cloud.
+        if (!trimmedName) {
+          // Stay in 'auth' — AuthScreen shows the name-capture step. Migration + boot
+          // are deferred until submitDisplayName runs.
+          return;
+        }
         (async () => {
           try {
             const toMigrate = await migrateLocalBlueprints();
@@ -526,11 +665,37 @@ export const useBlueprintStore = create<AppState>()(
         })();
       },
 
+      submitDisplayName: async (name) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        try {
+          await supabase.auth.updateUser({ data: { display_name: trimmed } });
+        } catch (err) {
+          console.error('[auth] updateUser failed:', err);
+          // Keep going — name still applies to this session even if metadata write failed.
+        }
+        set({ displayName: trimmed, pendingNameCapture: false });
+        try {
+          const toMigrate = await migrateLocalBlueprints();
+          if (toMigrate.length > 0) {
+            set({ pendingMigration: toMigrate });
+            return;
+          }
+          await completeBoot();
+        } catch (err) {
+          console.error('[boot] submitDisplayName bootstrap failed:', err);
+          set({ mode: 'onboarding' });
+        }
+      },
+
       signOut: async () => {
         await authSignOut();
         _bootPromise = null; // Reset so next login boots fresh
-        set({ mode: 'auth', userId: null, userEmail: null, pendingMigration: null, blueprint: null,
-          rfNodes: [], rfEdges: [], activeVersionId: null });
+        useCommentsStore.getState().clear();
+        set({ mode: 'auth', userId: null, userEmail: null, displayName: null,
+          pendingNameCapture: false, pendingMigration: null, blueprint: null,
+          rfNodes: [], rfEdges: [], activeVersionId: null, blueprintRowId: null, commentMode: false,
+          isCollaboratorView: false });
       },
 
       confirmMigration: async () => {
@@ -559,15 +724,29 @@ export const useBlueprintStore = create<AppState>()(
             `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`;
           sessionStorage.setItem('guest-session-id', sessionId);
           const storedName = sessionStorage.getItem('guest-name') || null;
+          const guestRowId = (data.blueprintRowId ?? null) as string | null;
           set({
             blueprint: bp, rfNodes: nodes, rfEdges: edges, mode: 'canvas',
             isGuestView: true, shareToken: token,
             guestCanComment: data.canComment ?? true,
             guestShareId: data.shareId ?? null,
-            guestBlueprintRowId: data.blueprintRowId ?? null,
+            guestBlueprintRowId: guestRowId,
+            // Mirror the guest row id into blueprintRowId so existing comment-aware
+            // components (CommentBadge, CommentThread anchoring) work without a
+            // guest-specific code path. Writes are still blocked by canParticipate.
+            blueprintRowId: guestRowId,
             guestSessionId: sessionId, guestName: storedName,
             activeVersionId: bp.activeVersionId ?? null,
           });
+          // Hydrate the comments store with whatever the edge function returned
+          // so guests can READ existing threads. Writes still blocked by RLS.
+          if (guestRowId && Array.isArray(data.comments)) {
+            useCommentsStore.getState().loadFromGuestPayload(
+              guestRowId,
+              data.comments as unknown[],
+              (data.reactions as unknown[]) ?? [],
+            );
+          }
           // Load any previously submitted guest comments for this session
           setTimeout(() => useBlueprintStore.getState().loadGuestComments(), 0);
         } catch {
@@ -741,9 +920,75 @@ export const useBlueprintStore = create<AppState>()(
           selectedNodeId: null, inspectorOpen: false,
           activeVersionId: versionId, compareMode: false, presentMode: false,
           presentationEditMode: false, activePresentationId: null, currentKeyframeIndex: 0,
-          overviewMode: false,
+          overviewMode: false, commentMode: false, blueprintRowId: null,
+          isCollaboratorView: false,
         });
+        useCommentsStore.getState().clear();
         setTimeout(() => useBlueprintStore.getState().loadGuestComments(), 0);
+        loadCommentsForBlueprint(bp.id);
+      },
+
+      switchToBlueprintByRowId: async (rowId, opts) => {
+        const { userId } = get();
+        if (!userId) return false;
+        const result = await fetchBlueprintByRowId(rowId);
+        if (!result) return false;
+        const { blueprint: bp, ownerId } = result;
+        const isCollab = ownerId !== userId;
+        const versionId = bp.activeVersionId ?? null;
+        const effectiveBp = getBlueprintForVersion(bp, versionId);
+        const { nodes, edges } = blueprintToFlow(effectiveBp);
+
+        // Only persist locally if the user owns this blueprint — caching a
+        // collaborator-viewed blueprint would later look like one of "their"
+        // projects in the dropdown.
+        if (!isCollab) {
+          saveBlueprint(bp);
+        }
+
+        set({
+          blueprint: bp,
+          rfNodes: nodes,
+          rfEdges: edges,
+          mode: 'canvas',
+          selectedNodeId: null,
+          inspectorOpen: false,
+          activeVersionId: versionId,
+          compareMode: false,
+          presentMode: false,
+          presentationEditMode: false,
+          activePresentationId: null,
+          currentKeyframeIndex: 0,
+          overviewMode: false,
+          // Collaborators land in comment mode by default — they can read,
+          // resolve, and reply to threads but cannot mutate the blueprint.
+          commentMode: isCollab,
+          isCollaboratorView: isCollab,
+          blueprintRowId: rowId,
+        });
+
+        // Load comments for the now-visible row id directly (skips the
+        // owner-scoped getBlueprintRowId lookup that loadCommentsForBlueprint
+        // would otherwise do).
+        useCommentsStore.getState().clear();
+        await useCommentsStore.getState().loadAll(rowId, userId);
+
+        if (opts?.openCommentId) {
+          // After loadAll, find the comment and open its thread anchored to
+          // the screen center as an approximation. The badge renderer will
+          // re-anchor on next interaction.
+          const c = useCommentsStore.getState().comments.find((x) => x.id === opts.openCommentId);
+          if (c) {
+            useCommentsStore.getState().openThread(c.anchor, {
+              x: window.innerWidth / 2,
+              y: window.innerHeight / 3,
+            });
+            // Defer the canvas pan until ReactFlow has registered its viewport
+            // setter (BlueprintCanvas onInit fires after mount).
+            setTimeout(() => get().animateToAnchor(c.anchor), 200);
+          }
+        }
+        return true;
       },
 
       // ─── Action mutations ──────────────────────────────────────────────────
@@ -1041,6 +1286,8 @@ export const useBlueprintStore = create<AppState>()(
         if (!blueprint) return;
         pushHistory();
         const eff = vRead();
+        const { phaseColumns } = computeColumnData(blueprint);
+        const colInfo = phaseColumns.get(id);
         const phaseActionIds = eff.actions.filter((a) => a.phaseId === id).map((a) => a.id);
         const phaseActionIdSet = new Set(phaseActionIds);
         const newPainPoints = eff.painPoints.filter((p) => !p.actionIds.every((aid) => phaseActionIdSet.has(aid)));
@@ -1049,12 +1296,17 @@ export const useBlueprintStore = create<AppState>()(
         const cleanedOpps = newOpps.map((o) => ({ ...o, actionIds: o.actionIds.filter((aid) => !phaseActionIdSet.has(aid)) }));
         const newQuestions = eff.questions.filter((q) => !q.actionIds.every((aid) => phaseActionIdSet.has(aid)));
         const cleanedQuestions = newQuestions.map((q) => ({ ...q, actionIds: q.actionIds.filter((aid) => !phaseActionIdSet.has(aid)) }));
+        const laneRemap = colInfo
+          ? applyLaneRemap(blueprint, colInfo.startCol, colInfo.colCount)
+          : { statusLanes: blueprint.statusLanes, timelineLanes: blueprint.timelineLanes };
         const bp = updatedAt(vWrite({
           ...blueprint,
           phases: blueprint.phases.filter((p) => p.id !== id),
           customEdges: (blueprint.customEdges ?? []).filter(
             (e) => !phaseActionIdSet.has(e.sourceActionId) && !phaseActionIdSet.has(e.targetActionId)
           ),
+          statusLanes: laneRemap.statusLanes,
+          timelineLanes: laneRemap.timelineLanes,
         }, {
           actions: eff.actions.filter((a) => a.phaseId !== id),
           painPoints: cleanedPainPoints,
@@ -1175,6 +1427,42 @@ export const useBlueprintStore = create<AppState>()(
         const id = `custom-${sourceActionId}-${targetActionId}-${Date.now()}`;
         const ce: CustomEdge = { id, sourceActionId, targetActionId, sourceHandle, targetHandle };
         apply(updatedAt({ ...blueprint, customEdges: [...(blueprint.customEdges ?? []), ce] }));
+      },
+
+      // Reconnect: rewire one endpoint of an existing edge while preserving its
+      // metadata (label, flowType, etc.). Atomic — single history entry.
+      // The new edge gets a fresh `custom-…` id; we copy edgeMeta[old] → [new]
+      // so labels and styling survive the rewire.
+      reconnectEdge: (oldEdgeId, sourceActionId, targetActionId, sourceHandle, targetHandle) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        pushHistory();
+
+        const oldMeta = blueprint.edgeMeta?.[oldEdgeId];
+        const isCustom = (blueprint.customEdges ?? []).some((e) => e.id === oldEdgeId);
+
+        let nextCustom = blueprint.customEdges ?? [];
+        let nextRemoved = blueprint.removedEdgeIds ?? [];
+        if (isCustom) {
+          nextCustom = nextCustom.filter((e) => e.id !== oldEdgeId);
+        } else if (!nextRemoved.includes(oldEdgeId)) {
+          nextRemoved = [...nextRemoved, oldEdgeId];
+        }
+
+        const newId = `custom-${sourceActionId}-${targetActionId}-${Date.now()}`;
+        const ce: CustomEdge = { id: newId, sourceActionId, targetActionId, sourceHandle, targetHandle };
+        nextCustom = [...nextCustom, ce];
+
+        const nextEdgeMeta = { ...(blueprint.edgeMeta ?? {}) };
+        delete nextEdgeMeta[oldEdgeId];
+        if (oldMeta) nextEdgeMeta[newId] = oldMeta;
+
+        apply(updatedAt({
+          ...blueprint,
+          customEdges: nextCustom,
+          removedEdgeIds: nextRemoved,
+          edgeMeta: nextEdgeMeta,
+        }));
       },
 
       // ─── Touchpoint tags ────────────────────────────────────────────────────
@@ -1300,6 +1588,52 @@ export const useBlueprintStore = create<AppState>()(
         centerOnPoint(cx, cy, undefined, 350);
       },
 
+      animateToAnchor: (anchor) => {
+        const { rfNodes, rfEdges } = get();
+        const nodeIdFor = (a: CommentAnchor): string | null => {
+          switch (a.type) {
+            case 'action': return `action-${a.id}`;
+            case 'phase': return `phase-${a.id}`;
+            case 'actor': return `actor-${a.id}`;
+            case 'statusLane': return `slane-label-${a.id}`;
+            case 'timelineLane': return `tlane-label-${a.id}`;
+            case 'statusSegment': return `sseg-${a.id}`;
+            case 'timelineSegment': return `tseg-${a.id}`;
+            default: return null;
+          }
+        };
+        const dimsOf = (n: Node): { w: number; h: number } => {
+          const data = (n.data ?? {}) as Record<string, unknown>;
+          const w = (n.width as number | undefined) ?? (data.width as number | undefined) ?? ACTION_NODE_WIDTH;
+          const h = (n.height as number | undefined) ?? (data.height as number | undefined) ??
+            (n.type === 'action' && data.action ? estimateActionHeight(data.action as Action) : 56);
+          return { w, h };
+        };
+        let cx: number | null = null;
+        let cy: number | null = null;
+        if (anchor.type === 'edge') {
+          const edge = rfEdges.find((e) => e.id === anchor.id);
+          if (!edge) return;
+          const src = rfNodes.find((n) => n.id === edge.source);
+          const tgt = rfNodes.find((n) => n.id === edge.target);
+          if (!src || !tgt) return;
+          const sd = dimsOf(src);
+          const td = dimsOf(tgt);
+          cx = ((src.position.x + sd.w / 2) + (tgt.position.x + td.w / 2)) / 2;
+          cy = ((src.position.y + sd.h / 2) + (tgt.position.y + td.h / 2)) / 2;
+        } else {
+          const id = nodeIdFor(anchor);
+          if (!id) return;
+          const node = rfNodes.find((n) => n.id === id);
+          if (!node) return;
+          const { w, h } = dimsOf(node);
+          cx = node.position.x + w / 2;
+          cy = node.position.y + h / 2;
+        }
+        if (cx == null || cy == null) return;
+        centerOnPoint(cx, cy, undefined, 500);
+      },
+
       setInspectorOpen: (open) => set({ inspectorOpen: open }),
 
       setSelectedActor: (id) => set({ selectedActorId: id, actorPanelOpen: id !== null, selectedNodeId: null, inspectorOpen: false, selectedPhaseId: null, phaseInspectorOpen: false }),
@@ -1322,12 +1656,36 @@ export const useBlueprintStore = create<AppState>()(
         set({ theme: next });
       },
 
-      togglePresentMode: () => set({ presentMode: !get().presentMode }),
+      togglePresentMode: () => set({
+        presentMode: !get().presentMode,
+        ...(!get().presentMode ? { commentMode: false } : {}),
+      }),
 
       toggleCompareMode: () => set({ compareMode: !get().compareMode }),
 
+      setCommentMode: (on) => {
+        if (on) {
+          // Mutually exclusive with present/presentationEdit/storyboard modes
+          set({
+            commentMode: true,
+            presentMode: false,
+            presentationEditMode: false,
+            storyboardMode: false,
+            // Close any open inspectors so they can't be edited
+            inspectorOpen: false,
+            actorPanelOpen: false,
+            phaseInspectorOpen: false,
+            edgeInspectorOpen: false,
+          });
+        } else {
+          set({ commentMode: false });
+          useCommentsStore.getState().closeThread();
+        }
+      },
+
       setPresentationEditMode: (on) => {
         if (on) {
+          if (get().commentMode) get().setCommentMode(false);
           // Auto-create a presentation if none exist
           const { blueprint } = get();
           if (blueprint && !(blueprint.presentations ?? []).length) {
@@ -1501,11 +1859,14 @@ export const useBlueprintStore = create<AppState>()(
         const col = phaseColumns.get(phaseId);
         if (!col || col.colCount <= 1) return;
         const eff = vRead();
+        const laneRemap = applyLaneRemap(blueprint, col.startCol + order, 1);
         apply(updatedAt(vWrite({
           ...blueprint,
           phases: blueprint.phases.map((p) =>
             p.id === phaseId ? { ...p, substepCount: col.colCount - 1 } : p
           ),
+          statusLanes: laneRemap.statusLanes,
+          timelineLanes: laneRemap.timelineLanes,
         }, {
           actions: eff.actions
             .filter((a) => !(a.phaseId === phaseId && a.order === order))
@@ -1729,7 +2090,15 @@ export const useBlueprintStore = create<AppState>()(
 
       // ─── Lane segment selection + live drag ────────────────────────────────
 
-      setSelectedLaneSegment: (id) => set({ selectedLaneSegmentId: id }),
+      setSelectedLaneSegment: (id) => set({
+        selectedLaneSegmentId: id,
+        ...(id ? { selectedLaneId: null } : {}),
+      }),
+
+      setSelectedLaneId: (id) => set({
+        selectedLaneId: id,
+        ...(id ? { selectedLaneSegmentId: null } : {}),
+      }),
 
       removeSelectedLaneSegment: () => {
         const { blueprint, selectedLaneSegmentId } = get();
@@ -1927,7 +2296,7 @@ Return ONLY a JSON object in this exact format:
       setStoryboardMode: (on) => {
         set({
           storyboardMode: on,
-          ...(on ? { compareMode: false, presentMode: false, presentationEditMode: false, overviewMode: false } : {}),
+          ...(on ? { compareMode: false, presentMode: false, presentationEditMode: false, overviewMode: false, commentMode: false } : {}),
         });
       },
 
@@ -2243,11 +2612,17 @@ if (_shareToken) {
     if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
       const { userId } = useBlueprintStore.getState();
       if (!userId) {
-        useBlueprintStore.getState().setUser(session.user.id, session.user.email ?? '');
+        const meta = (session.user.user_metadata ?? {}) as { display_name?: string };
+        useBlueprintStore.getState().setUser(
+          session.user.id,
+          session.user.email ?? '',
+          meta.display_name ?? null,
+        );
       }
     } else if (event === 'SIGNED_OUT') {
       _bootPromise = null; // Cancel any in-flight boot so the next login boots fresh
-      useBlueprintStore.setState({ mode: 'auth', userId: null, userEmail: null, blueprint: null,
+      useBlueprintStore.setState({ mode: 'auth', userId: null, userEmail: null,
+        displayName: null, pendingNameCapture: false, blueprint: null,
         rfNodes: [], rfEdges: [], activeVersionId: null, storyboardMode: false });
     }
   });
@@ -2256,7 +2631,12 @@ if (_shareToken) {
   // emit INITIAL_SESSION), getSession() ensures we still bootstrap on page load.
   getSession().then((session) => {
     if (session && !useBlueprintStore.getState().userId) {
-      useBlueprintStore.getState().setUser(session.user.id, session.user.email ?? '');
+      const meta = (session.user.user_metadata ?? {}) as { display_name?: string };
+      useBlueprintStore.getState().setUser(
+        session.user.id,
+        session.user.email ?? '',
+        meta.display_name ?? null,
+      );
     }
   });
 }

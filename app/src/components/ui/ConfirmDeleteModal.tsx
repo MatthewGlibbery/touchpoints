@@ -1,4 +1,5 @@
 import { Trash2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
 
 interface ConfirmDeleteModalProps {
   title: string;
@@ -8,7 +9,7 @@ interface ConfirmDeleteModalProps {
 }
 
 export function ConfirmDeleteModal({ title, description, onConfirm, onCancel }: ConfirmDeleteModalProps) {
-  return (
+  return createPortal(
     <div
       onClick={onCancel}
       style={{
@@ -96,6 +97,7 @@ export function ConfirmDeleteModal({ title, description, onConfirm, onCancel }: 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

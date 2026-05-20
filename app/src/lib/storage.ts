@@ -38,6 +38,10 @@ export async function saveBlueprintCloud(blueprint: Blueprint): Promise<void> {
     return;
   }
 
+  // Owner-scoped lookup — if the blueprint exists in the cloud but isn't
+  // owned by the current user (i.e. they're a collaborator), this returns
+  // null and we silently no-op rather than re-creating it under the new
+  // owner_id (which would fork the data).
   const { data: existing } = await supabase
     .from('blueprints')
     .select('id')
@@ -51,12 +55,26 @@ export async function saveBlueprintCloud(blueprint: Blueprint): Promise<void> {
       .update({ data: blueprint, updated_by: userId, updated_at: new Date().toISOString() })
       .eq('id', existing.id);
     if (error) console.error('[cloud] update error:', error);
-  } else {
-    const { error } = await supabase
-      .from('blueprints')
-      .insert({ owner_id: userId, data: blueprint, updated_by: userId });
-    if (error) console.error('[cloud] insert error:', error);
+    return;
   }
+
+  // No existing owned row. Before inserting, check whether this blueprint
+  // already exists in the cloud under a different owner — if it does, the
+  // current user is a collaborator and writes are not allowed. Skip the
+  // insert silently.
+  const { data: foreign } = await supabase
+    .from('blueprints')
+    .select('id')
+    .eq('data->>id', blueprint.id)
+    .maybeSingle();
+  if (foreign) {
+    return;
+  }
+
+  const { error } = await supabase
+    .from('blueprints')
+    .insert({ owner_id: userId, data: blueprint, updated_by: userId });
+  if (error) console.error('[cloud] insert error:', error);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -83,10 +101,14 @@ export async function fetchBlueprintsFromCloud(): Promise<Record<string, Bluepri
     const userId = await getCurrentUserId();
     if (!userId) return lsReadAll();
 
+    // Drop the explicit owner_id filter — RLS now returns owned rows AND
+    // rows the user is an accepted collaborator on (see migration
+    // 20260518_collaborator_blueprint_select.sql). The order of returned rows
+    // is unspecified across both sets but the local UI sorts by updatedAt
+    // anyway.
     const { data, error } = await supabase
       .from('blueprints')
       .select('data')
-      .eq('owner_id', userId)
       .order('updated_at', { ascending: false });
 
     if (error || !data) return lsReadAll();
@@ -103,6 +125,29 @@ export async function fetchBlueprintsFromCloud(): Promise<Record<string, Bluepri
     return all;
   } catch {
     return lsReadAll();
+  }
+}
+
+// Fetch a single blueprint by its DB row id (uuid). Returns null if RLS
+// blocks the read or the row doesn't exist. Used for deep-link navigation
+// from the notifications bell / email CTAs where we know the row id but not
+// the blueprint.data.id.
+export async function fetchBlueprintByRowId(
+  rowId: string,
+): Promise<{ blueprint: Blueprint; ownerId: string; rowId: string } | null> {
+  try {
+    const { data, error } = await supabase
+      .from('blueprints')
+      .select('id, owner_id, data')
+      .eq('id', rowId)
+      .maybeSingle();
+    if (error || !data) return null;
+    const bp = data.data as Blueprint;
+    if (!bp?.id) return null;
+    return { blueprint: bp, ownerId: data.owner_id as string, rowId: data.id as string };
+  } catch (e) {
+    console.error('[cloud] fetchBlueprintByRowId:', e);
+    return null;
   }
 }
 
@@ -193,7 +238,7 @@ export async function importBlueprintsToCloud(blueprints: Blueprint[]): Promise<
 
 // ─── Share links ──────────────────────────────────────────────────────────────
 
-async function getBlueprintRowId(blueprintDataId: string): Promise<string | null> {
+export async function getBlueprintRowId(blueprintDataId: string): Promise<string | null> {
   try {
     const userId = await getCurrentUserId();
     if (!userId) return null;

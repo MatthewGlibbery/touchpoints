@@ -32,9 +32,12 @@ presentationEditMode = true  → slide editor mode (mutually exclusive with pres
                                can be active while compareMode is true)
 compareMode = false          → single canvas (BlueprintCanvas)
 compareMode = true           → SplitCanvas rendered as canvas layer; other UI can overlay it
+commentMode = false          → normal
+commentMode = true           → read-only commenting mode (cursor turns into a comment bubble,
+                               hover highlights any structural element, click attaches a thread)
 ```
 
-`presentMode` and `presentationEditMode` are mutually exclusive. `compareMode` can coexist with `presentationEditMode` (SlidePanel overlays SplitCanvas).
+`presentMode`, `presentationEditMode`, `storyboardMode`, and `commentMode` are mutually exclusive. `compareMode` can coexist with `presentationEditMode` (SlidePanel overlays SplitCanvas).
 
 ### Data flow
 ```
@@ -132,6 +135,29 @@ type Storyboard           = { id, name, styleGuide, frames, createdAt, updatedAt
 // Style presets — stored INDEPENDENTLY of Blueprint in localStorage key 'touchpoints-style-presets'
 // Lives in app/src/lib/styleLibrary.ts; contains only baseStyle (not character descriptions)
 type StylePreset = { id, name, baseStyle, createdAt }
+
+// Comments / collaborators / notifications — stored INDEPENDENTLY of Blueprint in
+// dedicated Supabase tables (see §13). Loaded into a separate Zustand slice
+// (`app/src/store/comments.store.ts`); never written into blueprint.data JSONB.
+type CommentAnchorType =
+  | 'action' | 'phase' | 'actor' | 'edge'
+  | 'statusLane' | 'statusSegment' | 'timelineLane' | 'timelineSegment'
+type CommentAnchor   = { type: CommentAnchorType, id: string }
+type CommentMention  = { userId, email, name }
+type Comment         = { id, blueprintId, anchor: CommentAnchor,
+                         parentCommentId,            // null = thread root
+                         authorUserId, authorName, authorEmail,
+                         body,                        // mentions encoded @[name](userId)
+                         mentions: CommentMention[],
+                         createdAt, updatedAt,
+                         resolvedAt, resolvedByUserId }
+type CommentReaction = { id, commentId, userId,
+                         emoji: '👍'|'❤️'|'😂'|'🎉'|'✅'|'🤔', createdAt }
+type Collaborator    = { userId,                    // null until accepted
+                         email, name, invitedByUserId, invitedAt, acceptedAt }
+type Notification    = { id, userId, blueprintId, commentId,
+                         kind: 'mention'|'reply'|'reaction',
+                         snippet, actorName, readAt, createdAt }
 ```
 
 ### Version scope
@@ -168,7 +194,7 @@ The canvas is divided into stacked horizontal regions (Y offsets accumulate top-
 3. **Status lane region** — `statusRegionHeight = visibleStatusLanes * STATUS_LANE_HEIGHT`. Below phase header, above actors. 0 height if no visible status lanes.
 4. **Actor region** — swimlanes + action cards at `y = timelineRegionHeight + PHASE_HEADER_HEIGHT + statusRegionHeight`.
 
-`computeLaneOffsets(blueprint, isOverview)` returns `{ tLanes, sLanes, timelineRegionHeight, statusRegionHeight, phaseHeaderY, statusRegionY, actorRegionY }`. In overview mode lanes are hidden (both regions collapse to 0). All Y-positions in `blueprintToFlow` derive from `phaseHeaderY` / `actorRegionY`. Hit-testing in `getCellFromPosition` shifts the actor lookup by `actorRegionY`.
+`computeLaneOffsets(blueprint, isOverview)` returns `{ tLanes, sLanes, timelineRegionHeight, statusRegionHeight, timelineLanesHeight, statusLanesHeight, timelineAdderHeight, statusAdderHeight, phaseHeaderY, statusRegionY, actorRegionY }`. In edit mode (non-overview), each lane region always reserves one extra row at its end (`TIMELINE_LANE_HEIGHT` / `STATUS_LANE_HEIGHT`) for the "+ Add timeline" / "+ Add status" adder button — so the phase header always sits below a timeline-row gap and the actor region always sits below a status-row gap, even when no lanes exist. In overview mode lanes are hidden (both regions collapse to 0). All Y-positions in `blueprintToFlow` derive from `phaseHeaderY` / `actorRegionY`. Hit-testing in `getCellFromPosition` shifts the actor lookup by `actorRegionY`.
 
 ### Dynamic card and row heights
 Card height is estimated per-action by `estimateActionHeight(action: Action): number`:
@@ -212,15 +238,17 @@ Each phase can contain one or more **substep columns** (`substepCount` on Phase;
 | `columnInserter` | Insert a new substep column within a phase | Hover shows guide; click → `insertSubstep` |
 | `phaseBoundary` | Drag handle between adjacent phases | Drag L/R → `movePhaseBoundary` |
 | `phaseAdder` | "+" button after the last phase header | Click → `addPhase('New Phase')` |
-| `statusLaneLabel` | Lane name in left column for status lane | Double-click → rename; hover → eye toggle + delete |
-| `timelineLaneLabel` | Lane name in left column for timeline lane | Double-click → rename; hover → eye toggle + delete |
-| `laneBody` | Click-to-add segment overlay spanning the lane row | Hover shows column highlight + `+`; click → `addStatusSegment`/`addTimelineSegment` at hovered column |
+| `timelineAdder` | Left-column "+ Add timeline" button at the end of the timeline region; always rendered in edit mode | Click → `addTimelineLane(...)` |
+| `statusAdder` | Left-column "+ Add status" button at the end of the status region; always rendered in edit mode | Click → `addStatusLane(...)` |
+| `statusLaneLabel` | Lane name in left column for status lane | Mirrors `actorLabel` interaction model — hover shows tinted bg + drag grip; vertical drag reorders within status group via `reorderStatusLane`; click selects the lane (`selectedLaneId`); when selected a Trash button + a color-picker swatch button appear OUTSIDE the highlighted region on the LEFT (trash outermost; both styled to match `ActorPanel` delete button); trash gated by `ConfirmDeleteModal`; double-click → rename. |
+| `timelineLaneLabel` | Lane name in left column for timeline lane | Same pattern as `statusLaneLabel`, calling `reorderTimelineLane`. |
+| `laneBody` | Click-or-drag-to-add segment overlay spanning the lane row | Hover shows column highlight + `+` (in lane color); click → 1-col segment at hovered column; click-and-drag horizontally → multi-column segment from start col to current col (live preview spans the dragged range; clamps at occupied columns; Escape cancels) |
 | `statusSegment` | Pill-style segment within a status lane | Drag body → move (snap to columns); drag edges → resize; double-click → rename label; hover delete (×) |
 | `timelineSegment` | Dotted-line segment with centered duration label within a timeline lane | Same drag/resize/rename behaviors as statusSegment |
 
 All node types are defined in `app/src/components/canvas/nodeTypes.ts` and shared between `BlueprintCanvas` and `SplitCanvas`.
 
-`phaseAdder`, `columnOverlay` are filtered out in present mode (alongside `emptyCell`, `columnInserter`, `phaseBoundary`).
+`phaseAdder`, `actorAdder`, `timelineAdder`, `statusAdder`, `columnOverlay` are filtered out in present / overview / guest / comment / collaborator modes (alongside `emptyCell`, `columnInserter`, `phaseBoundary`). All four adder buttons (`phaseAdder`, `actorAdder`, `timelineAdder`, `statusAdder`) share a hover-only dotted border at 60% opacity; on hover they brighten to full opacity with the dashed border + tinted background visible.
 
 ### Column overlay
 `ColumnOverlayNode` receives `{ phaseId, order, colCount, height }`. One node per substep column, positioned at `(ACTOR_LABEL_WIDTH + colIndex * PHASE_WIDTH, PHASE_HEADER_HEIGHT)`, size `PHASE_WIDTH × totalCanvasHeight`.
@@ -282,8 +310,11 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 - **Auto-generated** horizontal edges (sequential actions, same actor+phase), vertical edges (same phaseId+order, adjacent actors), and **cross-phase edges** (last action of phaseN → first action of phaseN+1, per actor; phases sorted by `phase.order`)
 - **Custom edges** (`customEdges[]`): user-drawn via drag from connection handle; stored on Blueprint
 - **Removed edges** (`removedEdgeIds[]`): auto-generated edges the user deleted; filtered out in `blueprintToFlow`
-- Edge meta (`edgeMeta` keyed by edge ID): `flowType` ('sequence' / 'dependency' / 'decision') + optional label; dependency = purple, decision = amber dashed
+- Edge meta (`edgeMeta` keyed by edge ID): `flowType` ('sequence' / 'dependency' / 'decision') + optional `label` + optional `labelOffset` (0..1, position along path; default 0.5 = midpoint); dependency = purple, decision = amber dashed
 - `ConnectionMode.Loose` and `edgesReconnectable` enabled
+- **Selected-edge UX**: clicking an edge sets ReactFlow's `selected` state (and opens `EdgeInspector`). When selected, `CommentedSmoothStepEdge` renders visible `<circle>` markers at the source/target endpoints (`pointer-events: none` so they don't block drags). Underneath sit ReactFlow's `EdgeAnchor` reconnect zones — drag from the endpoint to a different action's handle to rewire.
+- **Reconnection preserves meta**: `BlueprintCanvas.onReconnect` calls a single atomic store action `reconnectEdge(oldId, src, tgt, srcHandle?, tgtHandle?)` which removes the old edge (filter from `customEdges` if custom, else add to `removedEdgeIds`), creates the new custom edge with a fresh id, and copies `edgeMeta[oldId] → edgeMeta[newId]`. Result: rewired edges keep their label, `flowType` color, and `labelOffset`.
+- **Draggable label**: when an edge has a label, the label container is `cursor: grab`. Mousedown → window-level mousemove projects the cursor (in flow coords via `screenToFlowPosition`) onto a hidden measurement `<path>` element via a coarse-then-fine `getPointAtLength` scan → live preview updates the rendered position → mouseup commits the new fraction via `updateEdgeMeta(id, { labelOffset })`. Disabled in present / guest / comment / collaborator modes.
 - **Z-index**: `.react-flow__edges { z-index: 1 }` raises the edges SVG layer above the nodes div within the ReactFlow viewport, so edges render at the same visual level as cards
 
 ### Canvas background
@@ -330,6 +361,7 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 | `selectedEdgeId` | `string\|null` | Opens EdgeInspector |
 | `edgeInspectorOpen` | `boolean` | |
 | `selectedColumnKey` | `string\|null` | Identifies selected column (`"${phaseId}-${order}"`); drives ColumnZone highlight |
+| `selectedLaneId` | `string\|null` | Selected status or timeline lane (mutually exclusive with `selectedLaneSegmentId`); shows the inline Trash button on `StatusLaneLabelNode` / `TimelineLaneLabelNode` |
 | `dragOverInserterId` | `string\|null` | Inserter node near dragged card; triggers card-drop-to-new-column |
 | `theme` | `'light'\|'dark'` | Persisted to localStorage |
 | `activeVersionId` | `string\|null` | Active version; null = base content |
@@ -342,12 +374,17 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 | `guestShareId` | `string\|null` | UUID of the `blueprint_shares` row (for writing `guest_comments`) |
 | `guestBlueprintRowId` | `string\|null` | UUID of the `blueprints` row (for FK in `guest_comments`) |
 | `shareToken` | `string\|null` | The share token from the URL (set when `isGuestView`) |
+| `displayName` | `string \| null` | Human-friendly display name from `auth.user_metadata.display_name`. Used as `Comment.authorName` on post and as the actor name in notifications/emails. Falls back to `userEmail` at render time when null. |
+| `pendingNameCapture` | `boolean` | True after sign-in if the user has no `display_name` set. AuthScreen shows the capture step; `submitDisplayName` clears the flag and proceeds to migration / boot. |
 | `presentMode` | `boolean` | Read-only presentation/playback mode |
 | `presentationEditMode` | `boolean` | Slide editor mode; mutually exclusive with `presentMode` |
 | `activePresentationId` | `string\|null` | Which presentation is being edited/played |
 | `currentKeyframeIndex` | `number` | Current slide index during playback |
 | `lightboxUrl` | `string\|null` | URL shown in full-screen lightbox overlay |
 | `multiSelectedNodeIds` | `string[]` | Action IDs currently selected via lasso (empty = no multi-select) |
+| `isCollaboratorView` | `boolean` | True when the loaded blueprint is owned by another user the current user has accepted-collaborator access to. Treated as `editLocked` everywhere alongside `commentMode` / `isGuestView`: hides edit-only UI (lane label color/delete controls, People pill), gates ReactFlow drag/select, blocks NodeInspector / ActorPanel / PhaseInspector / VersionBar / ProjectBar inputs, blocks undo/redo and Backspace-to-delete-segment. Surfaced visually as a "Viewing as collaborator" pill in `ProjectBar`. |
+| `blueprintRowId` | `string \| null` | UUID of the `blueprints` row for the loaded blueprint. Resolved during `setBlueprint` / `switchToBlueprint`. Cached so comment / collaborator / notification writes don't re-query on every action. Cleared on `signOut`. |
+| `commentMode` | `boolean` | Read-only commenting mode (see §5 sub-modes) |
 | `overviewMode` | `boolean` | Overview (semantic zoom) mode active — manual toggle only via ZoomToolbar |
 | `overviewGenerating` | `boolean` | AI overview generation in flight |
 | `selectedOverviewCell` | `{actorId,phaseId,actionId}\|null` | Selected cell in overview mode; drives OverviewInspector |
@@ -378,8 +415,10 @@ The store uses two factory-level closures (`vRead`, `vWrite`) so all content mut
 **Edge mutations** (updateEdgeMeta, removeEdge, addCustomEdge) always operate on the base blueprint (edges are shared across versions).
 
 ### Key actions
-- `setBlueprint` — layout recalc + save + mode switch to canvas; restores `activeVersionId` from persisted blueprint
-- `switchToBlueprint(id)` — load saved blueprint by ID; resets compareMode, presentMode, presentationEditMode
+- `setBlueprint` — layout recalc + save + mode switch to canvas; restores `activeVersionId` from persisted blueprint; resolves `blueprintRowId` and triggers `useCommentsStore.loadAll(rowId, userId)`
+- `switchToBlueprint(id)` — load saved blueprint by ID; resets compareMode, presentMode, presentationEditMode; resolves `blueprintRowId` and triggers comment/notification load
+- `switchToBlueprintByRowId(rowId, opts?)` — collaborator-side load. Resolves the blueprint via `fetchBlueprintByRowId`; sets `isCollaboratorView` if the row's `owner_id` differs from the current user; replaces store state and calls `useCommentsStore.loadAll(rowId, userId)`. When `opts.openCommentId` is supplied, opens that thread anchored at viewport center after comments load. Returns false on RLS denial / not found. Used by `NotificationsBell` cross-blueprint clicks and by the `?b=&comment=` boot deep-link.
+- `setCommentMode(on)` — toggles `commentMode`; mutually exclusive with `presentMode` / `presentationEditMode` / `storyboardMode`; closes inspectors
 - `startFromScratch()` — creates a blank blueprint and resets ALL UI flags: compareMode, compareVersionIds, presentMode, presentationEditMode, storyboardMode, overviewMode, all panels/selection, undo/redo stacks
 - `updateAction`, `addAction`, `removeAction`, `insertSubstep`
 - `deleteSubstep(phaseId, order)` — removes actions in that column, shifts higher-order actions down, decrements `substepCount`; no-op if only one column remains
@@ -474,7 +513,10 @@ Bootstraps from LocalStorage on module import.
 | Top-left (below ProjectBar) | VersionBar | "Current" (editable, double-click) + named version pills, fork (+), delete (×), Compare button; positioned `top: 56, left: 16` |
 | Top-centre | ModeBar | Blueprints (Map icon) / Personas (Users icon, stub) / Journey Maps (Film icon → storyboardMode); no Present tab — Present is accessed via ViewBar dropdown |
 | Top-right | ViewBar | Dropdown (pill + chevron, styled like ProjectBar): Edit / Pains / Opportunities / Questions + divider + Present; label shows 'Presenting' when in presentation context |
-| Top-right (left of ViewBar) | LanesPanel | "Lanes" pill button (Layers icon, count badge); opens dropdown with two sections — Timelines and Statuses — each with add button + per-lane row (color swatch, name, ↑↓ reorder, eye visibility toggle, delete) |
+| Top-left (right of ProjectBar) | NotificationsBell | Bell icon + unread count badge; dropdown lists mentions/replies/reactions; click row → load blueprint + open thread |
+| Top-left (in ProjectBar dropdown) | CollaboratorsPanel | Owner-only "People" section; invite-by-email + collaborator list with pending/accepted state |
+| Top-centre (canvas) | CommentFilterBar | Visible only in `commentMode`; filter pills All · @Me · Unresolved · Resolved · Detached |
+| Anywhere (anchored to clicked element) | CommentThread | Composer + flat reply list + reaction row + resolve toggle; opened by click in comment mode OR by clicking a `CommentBadge` in any mode |
 | Left | NodeInspector | Opens on action click (normal mode); slides in from left; `App.tsx` renders `<OverviewInspector />` instead when `overviewMode && selectedOverviewCell` |
 | Left | OverviewInspector | Replaces NodeInspector in overview mode; opens on action card click; editable `labelAbstract` + AI cell description; TabBar: Steps / Pains / Opps / Questions (cell-aggregated) |
 | Left | ActorPanel | Opens on actor label click; slides in from left; mutually exclusive with NodeInspector |
@@ -483,7 +525,6 @@ Bootstraps from LocalStorage on module import.
 | Bottom-centre | SlidePanel | Shown when `presentationEditMode`; `bottom: 72`, `z-index: 55` |
 | Bottom-centre | PresentationControls | Shown when `presentMode`; `bottom: 72`, `z-index: 60` |
 | Bottom-left | Theme toggle | Sun/moon icon button; `position: fixed, bottom: 16, left: 16` in App.tsx; always visible; `border-strong`, `shadow-md` for canvas contrast |
-| Bottom-left | DesignSystemModal toggle | Palette icon (dev tool); offset right of theme toggle at `left: 54` |
 
 ### Journey Map view (`storyboardMode`)
 Full-screen replacement for the canvas when `storyboardMode: true`. Rendered as `<JourneyMapView />` in `App.tsx`; canvas and all floating canvas UI are hidden.
@@ -514,22 +555,66 @@ Status and timeline lanes live OUTSIDE the actor swimlane region — they are in
 - **Status lanes** render *between* the phase header and the first actor swimlane. Each visible lane is one row at `STATUS_LANE_HEIGHT (56px)`. Use case: tracking a status that progresses across the journey (e.g. "Public status: Available → Booked").
 - **Timeline lanes** render *above* the phase header. Each visible lane is one row at `TIMELINE_LANE_HEIGHT (44px)`. Use case: durations between steps (e.g. "48 hours" with a dotted line spanning columns).
 
-Each lane has `visible: boolean` — when `false`, the lane is omitted entirely from layout and the canvas reflows. Toggle via the LanesPanel eye icon or the canvas-side label hover button.
+Each lane has `visible: boolean` (defaults to `true`) — when `false`, the lane is omitted entirely from layout and the canvas reflows. The flag exists in the data model but is not currently surfaced in the UI; lanes the user no longer wants are deleted, not hidden.
 
-**Segments** are anchored by `(startCol, endCol)` inclusive on the global column index. Width = `(endCol - startCol + 1) * PHASE_WIDTH`. At render time segments are clamped to `[0, totalColumns - 1]`, so phase deletion never crashes — just visually clips.
+**Segments** are anchored by `(startCol, endCol)` inclusive on the global column index. Width = `(endCol - startCol + 1) * PHASE_WIDTH`. At render time segments are clamped to `[0, totalColumns - 1]` as a safety net. When a phase or substep column is deleted, `removePhase` / `deleteSubstep` actively remap segment ranges via `remapSegmentsForColumnDelete` (drop segments entirely inside the deleted range, clamp segments straddling the boundary, shift segments after the range left) so the data stays consistent with the visible columns.
+
+**Per-segment colour override**: `LaneSegment.color` is optional; when set it overrides the lane colour for that segment only. The colour is exposed via a small `Palette` button next to the trash icon when a segment is selected — opens a 6-colour swatch popover plus a "reset to lane colour" affordance (which clears `segment.color` back to undefined). Layout resolves the rendered colour as `seg.color ?? lane.color`.
 
 **Status segment**: rounded pill with a 1.5px border in the lane color and a centered editable label. Drag body to move (snaps to columns); drag left/right edges to resize; double-click label to rename; hover-only × deletes.
 
 **Timeline segment**: dot–dotted-line–dot pattern with the duration label centered above the line on a `--surface-bg` background. Same drag/resize/rename interactions.
 
-**`laneBody` node** spans the full lane row beneath segments. Hovering shows a column highlight + `+` icon at the cursor's column; clicking adds a single-column segment at that position via `addStatusSegment` / `addTimelineSegment`.
+**`laneBody` node** spans the full lane row beneath segments. Hovering shows a column highlight + `+` icon at the cursor's column rendered in the lane's color (semi-transparent fill `${color}1A` + dashed border). Click-without-drag adds a single-column segment at that position via `addStatusSegment` / `addTimelineSegment`. Click-and-drag horizontally draws a live preview spanning `[min(start,end), max(start,end)]`; on mouseup creates a single multi-column segment. Drag clamps one column before any occupied col so segments never overlap. Escape cancels an in-flight draw.
 
-**Lane management** is done in the floating LanesPanel (top-right, left of the ViewBar): two sections (Timelines, Statuses), each with an Add button and per-lane row (color swatch, editable name, reorder ↑/↓, visibility toggle, delete).
+**Lane management** lives entirely on the canvas:
+- **Add**: left-column `timelineAdder` / `statusAdder` buttons at the end of each lane region.
+- **Rename**: double-click the lane label.
+- **Reorder**: vertical drag on the lane label (threshold = 60% of row height) calls `reorderStatusLane` / `reorderTimelineLane`.
+- **Recolor**: click the lane label to select it → color-picker swatch button appears OUTSIDE the highlighted region on the LEFT.
+- **Delete**: click the lane label to select it → red Trash button appears alongside the color picker, gated by `ConfirmDeleteModal`.
 
 **Overview mode** hides all lanes (`computeLaneOffsets` returns empty arrays when `isOverview` is true) — the simplified zoom focuses on representative steps only.
 
+### Comment mode
+When `commentMode` is true (mutually exclusive with `presentMode` / `presentationEditMode` / `storyboardMode`):
+- The cursor turns into a comment-bubble icon globally (`body.comment-mode { cursor: url('…') }`).
+- ReactFlow gating mirrors `presentMode`: `nodesDraggable`, `nodesConnectable`, `edgesReconnectable`, `selectionOnDrag` all set to `!commentMode && …`. `displayNodes` `EDITING` filter strips `emptyCell`, `columnInserter`, `columnOverlay`, `phaseBoundary`, `phaseAdder`, `actorAdder`.
+- Hovering any structural element (action card, phase header, actor label, edge midpoint, status/timeline lane, status/timeline segment) reveals a blue outline + glow via `body.comment-mode .react-flow__node:hover` CSS rules.
+- Click on a hovered element opens `CommentThread` popover anchored via screen-coord conversion (same approach as `SelectionToolbar`). Edge clicks route to the comment composer instead of `EdgeInspector`.
+- All inline edits in NodeInspector / ActorPanel / EdgeInspector / PhaseInspector / VersionBar / ProjectBar are gated on `commentMode || isGuestView`. Lane label drag/select/recolor/delete is also gated. Undo/redo keyboard shortcuts blocked.
+- A floating top-of-canvas pill bar (`CommentFilterBar`) shows filter pills: **All · @Me · Unresolved · Resolved · Detached**. State stored as `commentFilter` in the comments slice. Non-matching anchors hide their `CommentBadge`.
+- Activated from a comment-bubble button in `ViewBar` (or as a new ViewBar dropdown option).
+
+### CommentThread popover (`app/src/components/ui/CommentThread.tsx`)
+Floating popover anchored to the clicked element. Two modes:
+- **Composer-only** (no thread yet): textarea (with `MentionInput` `@` autocomplete listing collaborators), Post / Cancel.
+- **Thread**: header with anchor label + Resolve/Reopen toggle, list of root + flat replies, fixed reaction row under each comment (👍 ❤️ 😂 🎉 ✅ 🤔 — toggle on/off), reply textarea at the bottom.
+Anchor positioning uses `useStore(s => s.transform)`-driven screen rect helpers; for edges, the midpoint of the edge path. Closes on Escape or pane click.
+
+### CommentBadge (always-visible count indicators)
+Comment counts render in any mode (edit, present, comment) on every commented anchor:
+- `ActionNode` — alongside pain/opp/question badges, blue `MessageCircle` icon + count
+- `PhaseHeaderNode` — top-right corner of the header
+- `ActorLabelNode` — right edge of the label
+- Edges — overlay at edge midpoint via ReactFlow `<EdgeLabelRenderer>`
+- LaneNodes segments + lane labels — top-right corner
+Click on a badge → `openCommentThread(anchor)` regardless of current mode. Thread is read-only for users without write access (non-collaborators, guests).
+
+### NodeInspector "Comments" tab
+A new tab in `NodeInspector` between Questions and the existing tab set. Reads the same `comments` slice filtered by `anchor: { type: 'action', id: actionId }`. Renders the same composer + thread + reactions + resolve UI as the popover. Available in normal edit mode (read-only when not a collaborator); writes are gated.
+
+### NotificationsBell (`app/src/components/ui/NotificationsBell.tsx`)
+Bell icon with unread count badge mounted in `ProjectBar` next to the Share button. Dropdown lists recent rows from the `notifications` table (mentions, replies, reactions). Click a row → loads the linked blueprint and opens the linked comment thread (same deep-link path as email). "Mark all read" button.
+
+### CollaboratorsPanel (`app/src/components/ui/CollaboratorsPanel.tsx`)
+Owner-only panel mounted from a "People" button in `ProjectBar`. Lists current collaborators + pending invites (status pill). Owner can invite by email (calls `invite-collaborator` edge function), remove a collaborator. Invitees who sign in via OTP are reconciled by a DB trigger on `auth.users` insert/update (matching email → set `user_id` + `accepted_at`).
+
+### DetachedThreadsModal
+Lists threads whose anchor element no longer exists in the blueprint's structural data. Comments are NEVER cascade-deleted on element removal — they surface here. Per-thread "Re-attach to…" picker lets the user select a new anchor; permanent-delete option also available. Detected via a `getDetachedThreads(blueprintId)` selector that filters anchors against current structural state.
+
 ### Confirmation modal (`ConfirmDeleteModal`)
-All destructive delete actions show a `ConfirmDeleteModal` before executing. Applies to: deleting a step (NodeInspector), deleting an actor (ActorPanel), deleting a named version (VersionBar), deleting a presentation (SlidePanel), and deleting an individual slide (SlidePanel keyframe strip). The modal renders at `z-index: 9000` with a Trash2 icon, title, description, Cancel, and Delete buttons.
+All destructive delete actions show a `ConfirmDeleteModal` before executing. Applies to: deleting a step (NodeInspector), deleting an actor (ActorPanel), deleting a named version (VersionBar), deleting a presentation (SlidePanel), deleting an individual slide (SlidePanel keyframe strip), and deleting a status / timeline lane (on-canvas lane label trash button). The modal is rendered via `ReactDOM.createPortal(..., document.body)` so the `position: fixed` backdrop escapes any transformed ancestor (ReactFlow node wrappers, slide-in inspector panels) and consistently darkens the full viewport. `z-index: 9000`; Trash2 icon, title, description, Cancel, and Delete buttons.
 
 ### Present mode
 When `presentMode` is true:
@@ -648,7 +733,7 @@ Card div (`className="action-drag-handle"`) with:
 - **Description** (12px, muted, 2-line clamp) — optional
 - **Media preview** — first media item, edge-to-edge (negative side/bottom margins break out of 14px padding), max-height 120px; click on image/GIF → `setLightboxUrl` (opens global lightbox); sits flush at bottom of card when no badges, or above badges when badges present
 - **Divider + badge pills**: divider (`1px var(--border-subtle)`) only shown when NO media is present; when media is present, badges appear with top spacing only (no divider line); badges only shown if count > 0: transparent bg, `1px solid var(--border-subtle)`, icon + count; red = pains, green = opps, amber = questions
-- **Connection handles**: 12px circles at N/E/S/W edges; `opacity: 0` at rest; proximity-revealed via JS: a `mousemove` listener on the ReactFlow node wrapper sets `data-handle-near="<side>"` when the cursor is within 18px of an edge midpoint, CSS reveals only that handle at `opacity: 0.75`; on direct handle `:hover` or during active drag (`.connectingfrom` / `.connectingto`): `opacity: 1` + size grows to **16×16px**. `pointer-events: all !important` ensures handles receive events regardless of card stacking. **Do not use `.connectionindicator`** — in ReactFlow v12 that class is set on all connectable handles at idle ("valid connection point"), not only during an active drag.
+- **Connection handles**: 12px circles at N/E/S/W edges, anchored to the **visible card's** outer bounds (not the ReactFlow node wrapper, which inherits the row's height when another card in the row is taller). `ActionNode` measures the card with a `ResizeObserver` on the card ref and overrides each `<Handle>`'s `style` with explicit pixel `top`/`left`/`right`/`bottom` based on `cardSize` — so left/right handles always sit at the card's vertical center and bottom sits at the card's bottom-center. `opacity: 0` at rest; proximity-revealed via JS: a `mousemove` listener on the ReactFlow node wrapper sets `data-handle-near="<side>"` when the cursor is within 18px of an edge midpoint, CSS reveals only that handle at `opacity: 0.75`; on direct handle `:hover` or during active drag (`.connectingfrom` / `.connectingto`): `opacity: 1` + size grows to **16×16px**. `pointer-events: all !important` ensures handles receive events regardless of card stacking. **Do not use `.connectionindicator`** — in ReactFlow v12 that class is set on all connectable handles at idle ("valid connection point"), not only during an active drag.
 - **Selected state**: driven by `selectedNodeId === action.id` read from the Zustand store — NOT from ReactFlow's `selected` node prop. This ensures the highlight follows programmatic navigation (inspector arrow buttons, keyboard nav) correctly and not just pointer-driven ReactFlow selection.
 
 **Overview mode card** (when `overviewMode: true`): explicit `height: OVERVIEW_CARD_HEIGHT (56px)`, `box-sizing: border-box`; shows actor icon box + `labelAbstract || label` (2-line clamp); no description, badges, or media; cursor is `pointer`; click calls `setSelectedOverviewCell` → opens OverviewInspector; double-click enters inline edit mode for `labelAbstract` (saves via `updateAction`, Escape cancels); drag is disabled. The node height in the layout matches the card height exactly, so handles land at card borders.
@@ -690,6 +775,9 @@ app/src/
 │   │       ├── EmptyCellNode.tsx
 │   │       ├── PhaseBoundaryNode.tsx
 │   │       ├── PhaseAdderNode.tsx ← "Add Phase" button at end of phase header row
+│   │       ├── ActorAdderNode.tsx ← "Add Actor" button at bottom of actor labels
+│   │       ├── TimelineAdderNode.tsx ← left-column "Add Timeline" button at end of timeline region
+│   │       ├── StatusAdderNode.tsx  ← left-column "Add Status" button at end of status region
 │   │       ├── PhaseHeaderNode.tsx
 │   │       └── SwimlaneNode.tsx
 │   ├── storyboard/
@@ -704,6 +792,13 @@ app/src/
 │       ├── VersionBar.tsx         ← version tabs and compare trigger; top-left
 │       ├── SlidePanel.tsx         ← slide editor (keyframe strip + thumbnails)
 │       ├── PresentationControls.tsx ← present-mode playback bar
+│       ├── CommentThread.tsx       ← composer + flat reply list + reaction row + resolve toggle; popover anchored to a structural element
+│       ├── CommentBadge.tsx        ← always-visible count indicator; mounted on every commentable anchor
+│       ├── MentionInput.tsx        ← textarea + @-mention autocomplete (collaborators only)
+│       ├── CollaboratorsPanel.tsx  ← owner-only invite/list/remove; mounted from ProjectBar
+│       ├── NotificationsBell.tsx   ← bell icon + unread badge + dropdown; mounted in ProjectBar
+│       ├── CommentFilterBar.tsx    ← top-of-canvas filter pills (All · @Me · Unresolved · Resolved · Detached); only in commentMode
+│       ├── DetachedThreadsModal.tsx ← lists threads whose anchor was deleted; per-thread re-attach or permanent-delete
 │       ├── primitives.tsx
 │       └── DesignSystemModal.tsx
 ├── styles/
@@ -754,15 +849,15 @@ app/src/
 | "Exit compare" in SplitCanvas | Closes SplitCanvas; returns to regular canvas |
 | Click blueprint title in ProjectBar | Inline input → `renameBlueprint` on commit |
 | Switch view to Pains/Opps/Questions | `fitView({ padding: 0.12, duration: 700 })` to show full canvas |
-| Click "Lanes" pill (top-right) | Opens LanesPanel dropdown with Timelines + Statuses sections |
-| Click "+ Add" in a LanesPanel section | Creates a new lane (default name + cycled color) with `visible: true` |
-| Click eye icon on lane row | Toggles `lane.visible` — hidden lanes are removed from layout |
-| Click ↑/↓ on lane row | Reorders lane up/down within its kind (status or timeline) |
-| Click trash on lane row | Deletes the lane and renumbers remaining lanes' `order` |
-| Hover lane label on canvas | Reveals eye + delete buttons inline |
-| Double-click lane label on canvas | Inline rename of lane name |
-| Hover empty lane area on canvas | Shows column highlight at cursor — preview of where a new segment will land |
+| Click `timelineAdder` / `statusAdder` button | Creates a new lane (default name + cycled color) with `visible: true` |
+| Drag lane label vertically | Reorders lane up/down within its kind (status or timeline) — threshold 60% of row height |
+| Double-click lane label | Inline rename of lane name |
+| Click lane label | Selects the lane (`selectedLaneId`) — surfaces Trash + color-picker buttons OUTSIDE the highlight on the LEFT |
+| Click color-picker button on selected lane | Opens 6-swatch palette popover; pick → `updateStatusLane` / `updateTimelineLane` `{ color }` |
+| Click trash button on selected lane | Shows `ConfirmDeleteModal`; confirm → deletes the lane and renumbers `order` on remaining lanes |
+| Hover empty lane area on canvas | Shows column highlight at cursor in the lane's color — preview of where a new segment will land |
 | Click empty lane area on canvas | Creates a single-column segment at that column |
+| Click-and-drag horizontally on empty lane area | Draws a live preview across the dragged range; on release creates a single multi-column segment (clamps at occupied cols; Escape cancels) |
 | Drag segment body | Moves segment — snaps to whole columns; clamps to `[0, totalColumns-1]` |
 | Drag segment left/right edge | Resizes segment by adjusting `startCol` or `endCol` (snaps to columns) |
 | Double-click segment | Inline edit of segment label |
@@ -780,6 +875,17 @@ app/src/
 | ← / → in PresentationControls | Navigates to prev/next slide; calls `applyKeyframeState` + `animateToViewport`; compare→normal waits 350ms for canvas remount |
 | "Exit" in PresentationControls | Returns to `presentationEditMode` (slide editor) |
 | Any delete action (step/actor/version/presentation/slide) | Shows `ConfirmDeleteModal` before executing |
+| Toggle comment mode (ViewBar) | Sets `commentMode: true`; cursor → comment bubble; canvas becomes fully read-only; hover highlights every structural anchor |
+| Click any structural element in comment mode | Opens `CommentThread` composer anchored to that element (action / phase / actor / edge / status lane / status segment / timeline lane / timeline segment) |
+| Click `CommentBadge` (any mode) | Opens `CommentThread` for that anchor; thread is read-only for non-collaborators |
+| Type `@` in composer / reply | `MentionInput` autocomplete shows collaborators on this blueprint; selection inserts `@[name](userId)` token |
+| Submit comment / reply with mentions | `notify-comment` edge function fires → recipients get email + `notifications` row (de-duped per `(comment_id, recipient_id)`) |
+| Toggle reaction on a comment | Inserts/deletes `comment_reactions` row (unique on comment_id+user_id+emoji); notifies the comment author (debounced 5 min per `(comment_id, recipient_id)`) |
+| Click "Resolve" / "Reopen" on a thread | Sets `resolved_at` / clears it on the root comment; resolved threads hidden by default; "Resolved" filter pill reveals them |
+| Click `NotificationsBell` row | Loads the linked blueprint, opens the linked thread, marks the row read |
+| Invite collaborator (CollaboratorsPanel) | Calls `invite-collaborator` edge function → inserts pending `blueprint_collaborators` row + sends invite email |
+| Invitee signs in via OTP | DB trigger reconciles the matching `blueprint_collaborators` row with `user_id` + `accepted_at`; blueprint appears in their Projects dropdown |
+| Delete a structural element with comments | Comments are NOT cascade-deleted; surfaced in `DetachedThreadsModal` ("Detached (n)" pill in `CommentFilterBar`); owner can re-attach or permanently delete |
 
 | Click "Share" in ProjectBar | Opens share dropdown; loads existing token from Supabase; shows generate/copy/revoke controls |
 | Click "Generate share link" | Creates `blueprint_shares` row; displays shareable URL |
@@ -792,6 +898,34 @@ app/src/
 
 All interaction handlers in ActionNode, PhaseHeaderNode, and ActorLabelNode are gated by `presentMode` — they are no-ops when presenting. `isGuestView` disables the same ReactFlow interaction props (`nodesDraggable`, `nodesConnectable`, `edgesReconnectable`, `selectionOnDrag`) and filters editing nodes from `displayNodes`. In guest view: `ModeBar` and `ViewBar` remain visible; `ProjectBar`, `VersionBar`, `ActorPanel`, `EdgeInspector`, and all edit-mode canvas controls are hidden.
 
+### Keyboard shortcuts
+
+Bound at the top level in `App.tsx` (canvas) and `PresentationControls` (present mode). All bindings skip when focus is in an `INPUT` / `TEXTAREA` / `contentEditable`.
+
+| Mode | Key | Action |
+|---|---|---|
+| Canvas (edit) | `←` / `→` | With a step selected, navigates to the prev/next step in the **same actor row** (sorted by phase.order, then action.order). Calls `setSelectedNode` + `animateToNode`. |
+| Canvas (edit) | `↑` / `↓` | With a step selected, navigates to the prev/next step in the **same column** (same `phaseId` + `order`, sorted by `actor.order`). |
+| Canvas (edit) | `Backspace` / `Delete` | Removes the currently selected lane segment. Action card deletion is intentionally NOT bound here — too easy to lose work; deletion happens via the inspector's `ConfirmDeleteModal`. |
+| Canvas (edit) | `Escape` | Closes the topmost open inspector (NodeInspector → ActorPanel → PhaseInspector → EdgeInspector); if none open, clears the selected column; if none, clears the multi-select lasso. |
+| Canvas (edit) | `Cmd/Ctrl+Z` | Undo. Blocked when `commentMode` / `isGuestView` / `isCollaboratorView`. |
+| Canvas (edit) | `Cmd/Ctrl+Shift+Z` or `Cmd/Ctrl+Y` | Redo. Same gating as undo. |
+| Present mode | `←` / `PageUp` | Previous slide. |
+| Present mode | `→` / `PageDown` / `Space` | Next slide. |
+| Present mode | `Home` / `End` | Jump to first / last slide. |
+| Present mode | `Escape` | Exit present mode (returns to `presentationEditMode`). |
+
+Arrow-key navigation is skipped in `presentMode`, `storyboardMode`, `overviewMode`, and `compareMode` — those views own their own keyboard surface or have no concept of "selected step". ReactFlow's built-in arrow-key node movement is disabled via `disableKeyboardA11y={true}` so cards never get nudged.
+
+### Cursor conventions
+
+Defaults are managed in `global.css` and per-node inline styles:
+- Canvas pane (panning area) — default arrow cursor at rest; `grabbing` while panning. Overrides ReactFlow's default `grab` so the canvas reads as a viewport, not as something to grab.
+- Action cards — `pointer` (clickable to open inspector); `grabbing` while ReactFlow's drag is active (CSS rule keys off `.react-flow__node-action.dragging`).
+- Phase headers, actor labels — `pointer` at rest (clickable to open inspector); `grabbing` while dragging the row/column. The grip visual on the left edge keeps `grab` / `grabbing` to signal the drag affordance.
+- Lane segments, column-overlay grip, status/timeline segments — `grab` at rest, `grabbing` while dragging.
+- Connection handles on action cards — `crosshair` during connection drag.
+
 ---
 
 ## 12. Edge Functions
@@ -801,7 +935,9 @@ All interaction handlers in ActionNode, PhaseHeaderNode, and ActorLabelNode are 
 | `ai-generate` | JWT | Anthropic proxy for `generateBlueprint` |
 | `ai-overview` | JWT | Anthropic proxy for overview + cell description generation |
 | `ai-storyboard` | JWT | Anthropic + DALL-E proxy; uploads images to Supabase Storage |
-| `get-shared-blueprint` | None | Validates share token → returns `{ blueprint, canComment, shareId, blueprintRowId }` |
+| `get-shared-blueprint` | None | Validates share token → returns `{ blueprint, canComment, shareId, blueprintRowId, comments, reactions }`. Service-role read of `comments` + `comment_reactions` for the blueprint so guests can see existing threads (read-only — writes still require an authenticated collaborator and are RLS-gated). |
+| `invite-collaborator` | JWT | Owner-only. Inserts a `blueprint_collaborators` row + sends invite email via SMTP. |
+| `notify-comment` | JWT (service role internally) | Called after comment/reaction insert. Computes recipient set (mentions, thread root author, thread participants, reacted-to author), de-dups per `(comment_id, recipient_id)`, debounces reactions over a 5-min window, writes a `notifications` row per recipient, and sends an on-brand HTML email (from `Context/email-templates/comment-notification.html`) with a snippet + `?b=<id>&comment=<id>` deep-link. |
 
 `get-shared-blueprint` uses the service role key internally. It checks `blueprint_shares.expires_at` and returns 410 if expired.
 
@@ -823,7 +959,12 @@ Template at `app/.env.example` (committed, no values).
 - **Authentication → Email Templates**: Both "Magic Link" and "Confirm Signup" templates must show ONLY the 6-digit OTP code (`{{ .Token }}`) — the magic link (`{{ .ConfirmationURL }}`) must be removed. Reason: magic links with a different domain than the sender domain are commonly flagged as phishing by spam filters and rewritten/stripped by corporate email scanners. The app verifies via OTP only (`verifyOtp({ type: 'email' })`); the magic link redirect is unused, so `sendOTP` does not pass `emailRedirectTo`.
 - **Authentication → URL Configuration**: Site URL and Redirect URLs must include the deployed app URL (and `http://localhost:5173` for local dev)
 - **Authentication → SMTP**: Custom SMTP provider required to avoid Supabase free-tier rate limit (2 emails/hour per project). Resend (`smtp.resend.com:465`, username `resend`) recommended.
-- **Edge Functions deployed**: `ai-generate`, `ai-overview`, `ai-storyboard`, `get-shared-blueprint`
+- **Edge Functions deployed**: `ai-generate`, `ai-overview`, `ai-storyboard`, `get-shared-blueprint`, `invite-collaborator`, `notify-comment`
+- **Comment-system tables** (see schema in `Context/working.md`): `blueprint_collaborators`, `comments`, `comment_reactions`, `notifications`. RLS: collaborators access scoped to owner + accepted invitees by `auth.uid()`/`auth.email()`. A trigger on `auth.users` insert/update reconciles `blueprint_collaborators.user_id` + `accepted_at` for any pending row whose `email` matches the new user.
+- **`blueprints` SELECT widened for collaborators**: the SELECT policy on `public.blueprints` is `using (public.is_collaborator(id))` so accepted collaborators can read invited rows. INSERT / UPDATE / DELETE remain owner-only — collaborators are read-only at the blueprint level and write only through `comments` / `comment_reactions` (which have their own RLS). `fetchBlueprintsFromCloud()` no longer filters by `owner_id`; both owned and invited rows come back together. `saveBlueprintCloud(bp)` no-ops silently when the row exists under a different owner so collaborator-side mutations don't spam RLS-denial errors.
+
+### Deep-link parsing on boot
+`?b=<rowId>&comment=<commentId>` (set by the email CTA in `notify-comment` and the in-app `NotificationsBell` for cross-blueprint navigation): `completeBoot()` checks for `b` first; if present it calls `switchToBlueprintByRowId(b, { openCommentId: comment })` and falls through to default loading on failure. Both params are stripped from the URL via `history.replaceState` so a refresh doesn't re-trigger the navigation.
 
 ### Share link token generation
 `blueprint_shares.token` is generated **client-side** in `storage.ts` (`generateToken()` — `crypto.getRandomValues` → URL-safe base64) and passed explicitly on insert. The DB column has no default. The Supabase PostgreSQL version does not support `encode(..., 'base64url')`.

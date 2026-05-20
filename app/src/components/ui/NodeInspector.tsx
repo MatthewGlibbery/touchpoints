@@ -4,8 +4,10 @@ import { useBlueprintStore } from '../../store/blueprint.store';
 import type { PainPoint, Opportunity, Question, ActionMedia } from '../../types/blueprint';
 import { Panel, IconButton, FieldBlock, TabBar, inputStyle } from './primitives';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { ThreadView } from './CommentThread';
+import { useCommentsStore, commentCountForAnchor } from '../../store/comments.store';
 
-type Tab = 'details' | 'pains' | 'opportunities' | 'questions';
+type Tab = 'details' | 'pains' | 'opportunities' | 'questions' | 'comments';
 const ACTOR_ICONS = [User, Globe, Building2, Users];
 
 export function NodeInspector() {
@@ -32,10 +34,18 @@ export function NodeInspector() {
   const inspectorRequestedTab = useBlueprintStore((s) => s.inspectorRequestedTab);
   const clearInspectorRequestedTab = useBlueprintStore((s) => s.clearInspectorRequestedTab);
   const isGuestView = useBlueprintStore((s) => s.isGuestView);
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
   const guestCanComment = useBlueprintStore((s) => s.guestCanComment);
   const addGuestPainPoint = useBlueprintStore((s) => s.addGuestPainPoint);
   const addGuestOpportunity = useBlueprintStore((s) => s.addGuestOpportunity);
   const addGuestQuestion = useBlueprintStore((s) => s.addGuestQuestion);
+
+  const commentsList = useCommentsStore((s) => s.comments);
+
+  // Edit lock: any input/edit action is gated. Distinct from `isGuestView` which
+  // also flips the UI to guest variants — commentMode keeps owner UI but disables edits.
+  const editLocked = isGuestView || commentMode || isCollaboratorView;
 
   const [activeTab, setActiveTab] = useState<Tab>('details');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -97,11 +107,14 @@ export function NodeInspector() {
 
   const ActorIcon = ACTOR_ICONS[actor.order % ACTOR_ICONS.length] ?? Activity;
 
+  const commentCount = action ? commentCountForAnchor(commentsList, { type: 'action', id: action.id }) : 0;
+
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'details', label: 'Details' },
     { id: 'pains', label: 'Pains', count: painPoints.length || undefined },
     { id: 'opportunities', label: 'Opps', count: opportunities.length || undefined },
     { id: 'questions', label: 'Questions', count: questions.length || undefined },
+    { id: 'comments', label: 'Comments', count: commentCount || undefined },
   ];
 
   return (
@@ -149,17 +162,17 @@ export function NodeInspector() {
         {activeTab === 'details' && (
           <>
             <FieldBlock label="Step name">
-              <input value={labelDraft} onChange={(e) => !isGuestView && setLabelDraft(e.target.value)}
-                onBlur={() => { if (isGuestView) return; const v = labelDraft.trim(); if (v && v !== action.label) updateAction(action.id, { label: v }); }}
+              <input value={labelDraft} onChange={(e) => !editLocked && setLabelDraft(e.target.value)}
+                onBlur={() => { if (editLocked) return; const v = labelDraft.trim(); if (v && v !== action.label) updateAction(action.id, { label: v }); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                readOnly={isGuestView}
-                style={{ ...inputStyle, cursor: isGuestView ? 'default' : undefined }} />
+                readOnly={editLocked}
+                style={{ ...inputStyle, cursor: editLocked ? 'default' : undefined }} />
             </FieldBlock>
             <FieldBlock label="What this step is responsible for">
-              <textarea value={detailDraft} onChange={(e) => !isGuestView && setDetailDraft(e.target.value)}
-                onBlur={() => { if (isGuestView) return; const v = detailDraft.trim(); if (v !== (action.labelDetailed ?? '')) updateAction(action.id, { labelDetailed: v || undefined }); }}
-                readOnly={isGuestView}
-                rows={4} style={{ ...inputStyle, resize: isGuestView ? 'none' : 'vertical', lineHeight: 1.6, cursor: isGuestView ? 'default' : undefined }} />
+              <textarea value={detailDraft} onChange={(e) => !editLocked && setDetailDraft(e.target.value)}
+                onBlur={() => { if (editLocked) return; const v = detailDraft.trim(); if (v !== (action.labelDetailed ?? '')) updateAction(action.id, { labelDetailed: v || undefined }); }}
+                readOnly={editLocked}
+                rows={4} style={{ ...inputStyle, resize: editLocked ? 'none' : 'vertical', lineHeight: 1.6, cursor: editLocked ? 'default' : undefined }} />
             </FieldBlock>
 
             {/* Decision point tag */}
@@ -199,6 +212,7 @@ export function NodeInspector() {
             {painPoints.map((pp) => (
               <PainPointItem key={pp.id} pp={pp}
                 isGuestView={isGuestView}
+                commentMode={commentMode}
                 onUpdate={(patch) => updatePainPoint(pp.id, patch)}
                 onRemove={() => removePainPoint(pp.id)} />
             ))}
@@ -210,7 +224,7 @@ export function NodeInspector() {
                 onDiscard={() => setGuestDraft(null)}
               />
             )}
-            {!isGuestView && <AddButton onClick={() => addPainPoint(action.id, '', 'medium')} label="Add pain point" />}
+            {!editLocked && <AddButton onClick={() => addPainPoint(action.id, '', 'medium')} label="Add pain point" />}
             {isGuestView && guestCanComment && !guestDraft && <AddButton onClick={() => setGuestDraft('pain')} label="Add pain point" />}
           </>
         )}
@@ -221,6 +235,7 @@ export function NodeInspector() {
             {opportunities.map((opp) => (
               <OppItem key={opp.id} opp={opp}
                 isGuestView={isGuestView}
+                commentMode={commentMode}
                 onUpdate={(patch) => updateOpportunity(opp.id, patch)}
                 onRemove={() => removeOpportunity(opp.id)} />
             ))}
@@ -232,7 +247,7 @@ export function NodeInspector() {
                 onDiscard={() => setGuestDraft(null)}
               />
             )}
-            {!isGuestView && <AddButton onClick={() => addOpportunity(action.id, '')} label="Add opportunity" />}
+            {!editLocked && <AddButton onClick={() => addOpportunity(action.id, '')} label="Add opportunity" />}
             {isGuestView && guestCanComment && !guestDraft && <AddButton onClick={() => setGuestDraft('opp')} label="Add opportunity" />}
           </>
         )}
@@ -243,6 +258,7 @@ export function NodeInspector() {
             {questions.map((q) => (
               <QuestionItem key={q.id} q={q}
                 isGuestView={isGuestView}
+                commentMode={commentMode}
                 onUpdate={(patch) => updateQuestion(q.id, patch)}
                 onRemove={() => removeQuestion(q.id)} />
             ))}
@@ -254,15 +270,20 @@ export function NodeInspector() {
                 onDiscard={() => setGuestDraft(null)}
               />
             )}
-            {!isGuestView && <AddButton onClick={() => addQuestion(action.id, '')} label="Add question" />}
+            {!editLocked && <AddButton onClick={() => addQuestion(action.id, '')} label="Add question" />}
             {isGuestView && guestCanComment && !guestDraft && <AddButton onClick={() => setGuestDraft('question')} label="Add question" />}
           </>
         )}
 
+        {/* Comments */}
+        {activeTab === 'comments' && (
+          <ThreadView anchor={{ type: 'action', id: action.id }} />
+        )}
+
       </div>
 
-      {/* Delete step — only on Details tab, not in guest view */}
-      {activeTab === 'details' && !isGuestView && <div style={{ padding: '0 18px 16px', flexShrink: 0 }}>
+      {/* Delete step — only on Details tab, not in guest view or comment mode */}
+      {activeTab === 'details' && !editLocked && <div style={{ padding: '0 18px 16px', flexShrink: 0 }}>
         <div style={{ height: 1, background: 'var(--border-subtle)', marginBottom: 12 }} />
         <button
           onClick={() => setConfirmDelete(true)}
@@ -351,9 +372,9 @@ function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
   );
 }
 
-function PainPointItem({ pp, isGuestView, onUpdate, onRemove }: { pp: PainPoint; isGuestView?: boolean; onUpdate: (p: Partial<Pick<PainPoint, 'description' | 'severity'>>) => void; onRemove: () => void }) {
+function PainPointItem({ pp, isGuestView, commentMode, onUpdate, onRemove }: { pp: PainPoint; isGuestView?: boolean; commentMode?: boolean; onUpdate: (p: Partial<Pick<PainPoint, 'description' | 'severity'>>) => void; onRemove: () => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  const readonly = isGuestView && !pp.guestContributed;
+  const readonly = (isGuestView && !pp.guestContributed) || !!commentMode;
   useEffect(() => { if (pp.description === '' && ref.current) ref.current.focus(); }, []);
 
   return (
@@ -372,9 +393,9 @@ function PainPointItem({ pp, isGuestView, onUpdate, onRemove }: { pp: PainPoint;
   );
 }
 
-function OppItem({ opp, isGuestView, onUpdate, onRemove }: { opp: Opportunity; isGuestView?: boolean; onUpdate: (p: Partial<Pick<Opportunity, 'description' | 'effort'>>) => void; onRemove: () => void }) {
+function OppItem({ opp, isGuestView, commentMode, onUpdate, onRemove }: { opp: Opportunity; isGuestView?: boolean; commentMode?: boolean; onUpdate: (p: Partial<Pick<Opportunity, 'description' | 'effort'>>) => void; onRemove: () => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  const readonly = isGuestView && !opp.guestContributed;
+  const readonly = (isGuestView && !opp.guestContributed) || !!commentMode;
   useEffect(() => { if (opp.description === '' && ref.current) ref.current.focus(); }, []);
 
   return (
@@ -393,9 +414,9 @@ function OppItem({ opp, isGuestView, onUpdate, onRemove }: { opp: Opportunity; i
   );
 }
 
-function QuestionItem({ q, isGuestView, onUpdate, onRemove }: { q: Question; isGuestView?: boolean; onUpdate: (p: Partial<Pick<Question, 'text' | 'type'>>) => void; onRemove: () => void }) {
+function QuestionItem({ q, isGuestView, commentMode, onUpdate, onRemove }: { q: Question; isGuestView?: boolean; commentMode?: boolean; onUpdate: (p: Partial<Pick<Question, 'text' | 'type'>>) => void; onRemove: () => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  const readonly = isGuestView && !q.guestContributed;
+  const readonly = (isGuestView && !q.guestContributed) || !!commentMode;
   useEffect(() => { if (q.text === '' && ref.current) ref.current.focus(); }, []);
 
   return (

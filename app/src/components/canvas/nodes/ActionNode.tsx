@@ -6,7 +6,9 @@ import {
 } from 'lucide-react';
 import type { Action } from '../../../types/blueprint';
 import { useBlueprintStore } from '../../../store/blueprint.store';
+import { useCommentsStore } from '../../../store/comments.store';
 import { ACTION_NODE_WIDTH, OVERVIEW_CARD_HEIGHT } from '../../../lib/layout';
+import { CommentBadge } from '../../ui/CommentBadge';
 
 type ActionNodeData = { action: Action; actorColor: string; actorOrder: number };
 
@@ -40,9 +42,28 @@ export const ActionNode = memo(({ data }: NodeProps) => {
   const setLightboxUrl = useBlueprintStore((s) => s.setLightboxUrl);
   const canvasView = useBlueprintStore((s) => s.canvasView);
   const presentMode = useBlueprintStore((s) => s.presentMode);
+  const commentMode = useBlueprintStore((s) => s.commentMode);
   const overviewMode = useBlueprintStore((s) => s.overviewMode);
   const selectedNodeId = useBlueprintStore((s) => s.selectedNodeId);
   const selected = selectedNodeId === action.id;
+  const openThread = useCommentsStore((s) => s.openThread);
+
+  const cardCenterPos = useCallback((): { x: number; y: number } | null => {
+    const el = cardRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.bottom };
+  }, []);
+
+  const handleCardClick = useCallback(() => {
+    if (presentMode) return;
+    if (commentMode) {
+      openThread({ type: 'action', id: action.id }, cardCenterPos());
+      return;
+    }
+    setSelectedNode(action.id);
+    animateToNode(action.id);
+  }, [presentMode, commentMode, openThread, action.id, cardCenterPos, setSelectedNode, animateToNode]);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(action.label);
@@ -51,6 +72,25 @@ export const ActionNode = memo(({ data }: NodeProps) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const overviewInputRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  // Track the card's actual rendered size so connection handles always anchor
+  // to the visible card bounds — not the ReactFlow node wrapper, which can be
+  // taller than the card when the row is sized to a taller sibling.
+  const [cardSize, setCardSize] = useState<{ w: number; h: number }>({
+    w: ACTION_NODE_WIDTH,
+    h: overviewMode ? OVERVIEW_CARD_HEIGHT : 140,
+  });
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    // Use offsetWidth/Height (border-box) so handle anchors land on the visible
+    // card's outer edge, not the content-box.
+    const sync = () => setCardSize({ w: el.offsetWidth, h: el.offsetHeight });
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    sync();
+    return () => ro.disconnect();
+  }, [overviewMode]);
 
   const HANDLE_PROXIMITY = 18; // px from edge midpoint to reveal handle
 
@@ -154,6 +194,32 @@ export const ActionNode = memo(({ data }: NodeProps) => {
 
   const firstMedia = action.media?.[0];
 
+  // Anchor each Handle to the card's actual edges/centers, overriding
+  // ReactFlow's default percentage-based placement (which uses the wrapper —
+  // it can be taller than the card when the row was sized to a taller card).
+  const leftHandleStyle: React.CSSProperties = {
+    ...handleStyle,
+    top: cardSize.h / 2,
+    left: 0,
+  };
+  const rightHandleStyle: React.CSSProperties = {
+    ...handleStyle,
+    top: cardSize.h / 2,
+    left: cardSize.w,
+    right: 'auto',
+  };
+  const topHandleStyle: React.CSSProperties = {
+    ...handleStyle,
+    top: 0,
+    left: cardSize.w / 2,
+  };
+  const bottomHandleStyle: React.CSSProperties = {
+    ...handleStyle,
+    top: cardSize.h,
+    bottom: 'auto',
+    left: cardSize.w / 2,
+  };
+
   // ─── Overview (semantic zoom) rendering ────────────────────────────────────
   if (overviewMode) {
     const overviewLabel = action.labelAbstract || action.label;
@@ -172,14 +238,18 @@ export const ActionNode = memo(({ data }: NodeProps) => {
 
     return (
       <>
-        <Handle id="left"   type="target" position={Position.Left}   style={handleStyle} />
-        <Handle id="right"  type="source" position={Position.Right}  style={handleStyle} />
-        <Handle id="top"    type="target" position={Position.Top}    style={handleStyle} />
-        <Handle id="bottom" type="source" position={Position.Bottom} style={handleStyle} />
+        <Handle id="left"   type="target" position={Position.Left}   style={leftHandleStyle} />
+        <Handle id="right"  type="source" position={Position.Right}  style={rightHandleStyle} />
+        <Handle id="top"    type="target" position={Position.Top}    style={topHandleStyle} />
+        <Handle id="bottom" type="source" position={Position.Bottom} style={bottomHandleStyle} />
         <div
           ref={cardRef}
           className="action-drag-handle"
-          onClick={() => { if (!presentMode && !editingOverview) setSelectedOverviewCell(action.actorId, action.phaseId, action.id); }}
+          onClick={() => {
+            if (presentMode || editingOverview) return;
+            if (commentMode) { openThread({ type: 'action', id: action.id }, cardCenterPos()); return; }
+            setSelectedOverviewCell(action.actorId, action.phaseId, action.id);
+          }}
           onDoubleClick={(e) => {
             if (presentMode) return;
             e.stopPropagation();
@@ -270,10 +340,10 @@ export const ActionNode = memo(({ data }: NodeProps) => {
 
   return (
     <>
-      <Handle id="left"   type="target" position={Position.Left}   style={handleStyle} />
-      <Handle id="right"  type="source" position={Position.Right}  style={handleStyle} />
-      <Handle id="top"    type="target" position={Position.Top}    style={handleStyle} />
-      <Handle id="bottom" type="source" position={Position.Bottom} style={handleStyle} />
+      <Handle id="left"   type="target" position={Position.Left}   style={leftHandleStyle} />
+      <Handle id="right"  type="source" position={Position.Right}  style={rightHandleStyle} />
+      <Handle id="top"    type="target" position={Position.Top}    style={topHandleStyle} />
+      <Handle id="bottom" type="source" position={Position.Bottom} style={bottomHandleStyle} />
 
       <div
         ref={cardRef}
@@ -287,13 +357,19 @@ export const ActionNode = memo(({ data }: NodeProps) => {
           boxShadow: shadow,
           padding: '14px',
           overflow: 'hidden',
-          cursor: presentMode ? 'default' : 'grab',
+          cursor: presentMode ? 'default' : 'pointer',
           opacity: dimmed ? 0.3 : 1,
           transition: 'border-color 0.2s, box-shadow 0.2s, opacity 0.2s, background 0.2s',
         }}
-        onDoubleClick={(e) => { if (presentMode || overviewMode) return; e.stopPropagation(); setEditing(true); }}
-        onClick={() => { if (!presentMode) { setSelectedNode(action.id); animateToNode(action.id); } }}
+        onDoubleClick={(e) => { if (presentMode || overviewMode || commentMode) return; e.stopPropagation(); setEditing(true); }}
+        onClick={handleCardClick}
       >
+        {/* Comment badge — top-right of card; visible in any mode when commented */}
+        <CommentBadge
+          anchor={{ type: 'action', id: action.id }}
+          getAnchorPos={cardCenterPos}
+          style={{ position: 'absolute', top: -8, right: -8 }}
+        />
         {/* Icon + label row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div

@@ -8,6 +8,8 @@ import { ColumnOverlayNode } from './nodes/ColumnOverlayNode';
 import { PhaseBoundaryNode } from './nodes/PhaseBoundaryNode';
 import { PhaseAdderNode } from './nodes/PhaseAdderNode';
 import { ActorAdderNode } from './nodes/ActorAdderNode';
+import { TimelineAdderNode } from './nodes/TimelineAdderNode';
+import { StatusAdderNode } from './nodes/StatusAdderNode';
 import {
   StatusLaneLabelNode,
   TimelineLaneLabelNode,
@@ -15,6 +17,11 @@ import {
   StatusSegmentNode,
   TimelineSegmentNode,
 } from './nodes/LaneNodes';
+import { CommentedSmoothStepEdge } from './edges/CommentedSmoothStepEdge';
+
+export const edgeTypes = {
+  smoothstep: CommentedSmoothStepEdge,
+};
 
 export const nodeTypes = {
   phaseHeader: PhaseHeaderNode,
@@ -27,6 +34,8 @@ export const nodeTypes = {
   phaseBoundary: PhaseBoundaryNode,
   phaseAdder: PhaseAdderNode,
   actorAdder: ActorAdderNode,
+  timelineAdder: TimelineAdderNode,
+  statusAdder: StatusAdderNode,
   statusLaneLabel: StatusLaneLabelNode,
   timelineLaneLabel: TimelineLaneLabelNode,
   laneBody: LaneBodyNode,

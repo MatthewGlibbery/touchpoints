@@ -1,10 +1,13 @@
-import { memo, useState, useCallback, useEffect } from 'react';
+import { memo, useState, useCallback, useEffect, useRef } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { useReactFlow } from '@xyflow/react';
-import { Eye, EyeOff, Trash2, Plus, MoveHorizontal } from 'lucide-react';
+import { Trash2, Plus, MoveHorizontal, Palette, RotateCcw, GripVertical } from 'lucide-react';
 import type { StatusLane, TimelineLane, LaneSegment } from '../../../types/blueprint';
 import { useBlueprintStore } from '../../../store/blueprint.store';
+import { useCommentsStore } from '../../../store/comments.store';
 import { ACTOR_LABEL_WIDTH, PHASE_WIDTH, getColFromX, getColFromXSnap } from '../../../lib/layout';
+import { CommentBadge } from '../../ui/CommentBadge';
+import { ConfirmDeleteModal } from '../../ui/ConfirmDeleteModal';
 
 // ─── Status lane label ────────────────────────────────────────────────────────
 
@@ -14,13 +17,25 @@ export const StatusLaneLabelNode = memo(({ data }: NodeProps) => {
   const { lane, height } = data as StatusLaneLabelData;
   const updateStatusLane = useBlueprintStore((s) => s.updateStatusLane);
   const removeStatusLane = useBlueprintStore((s) => s.removeStatusLane);
+  const reorderStatusLane = useBlueprintStore((s) => s.reorderStatusLane);
+  const setSelectedLaneId = useBlueprintStore((s) => s.setSelectedLaneId);
+  const selectedLaneId = useBlueprintStore((s) => s.selectedLaneId);
   const presentMode = useBlueprintStore((s) => s.presentMode);
   const isGuestView = useBlueprintStore((s) => s.isGuestView);
-  const readOnly = presentMode || isGuestView;
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
+  const openThread = useCommentsStore((s) => s.openThread);
+  const readOnly = presentMode || isGuestView || commentMode || isCollaboratorView;
+  const selected = selectedLaneId === lane.id;
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(lane.name);
   const [hovered, setHovered] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const dragStartY = useRef(0);
+  const didDrag = useRef(false);
+  const threshold = height * 0.6;
 
   useEffect(() => { setDraft(lane.name); }, [lane.name]);
 
@@ -31,10 +46,55 @@ export const StatusLaneLabelNode = memo(({ data }: NodeProps) => {
     setEditing(false);
   };
 
+  const onDivMouseDown = useCallback((e: React.MouseEvent) => {
+    if (readOnly || editing) return;
+    e.stopPropagation();
+    dragStartY.current = e.clientY;
+    didDrag.current = false;
+    setDragging(true);
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientY - dragStartY.current;
+      if (delta > threshold) {
+        didDrag.current = true;
+        reorderStatusLane(lane.id, 'down');
+        dragStartY.current = ev.clientY;
+      } else if (delta < -threshold) {
+        didDrag.current = true;
+        reorderStatusLane(lane.id, 'up');
+        dragStartY.current = ev.clientY;
+      }
+    };
+
+    const onUp = () => {
+      setDragging(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [lane.id, reorderStatusLane, threshold, readOnly, editing]);
+
+  const showGrip = !readOnly && (hovered || dragging);
+  const showHoverFill = !readOnly && (hovered || dragging || selected);
+
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onMouseDown={onDivMouseDown}
+      onClick={(e) => {
+        if (didDrag.current) return;
+        if (commentMode) {
+          e.stopPropagation();
+          openThread({ type: 'statusLane', id: lane.id }, { x: e.clientX, y: e.clientY });
+          return;
+        }
+        if (readOnly) return;
+        e.stopPropagation();
+        setSelectedLaneId(lane.id);
+      }}
       style={{
         width: ACTOR_LABEL_WIDTH,
         height,
@@ -42,12 +102,37 @@ export const StatusLaneLabelNode = memo(({ data }: NodeProps) => {
         alignItems: 'center',
         justifyContent: 'flex-end',
         paddingRight: 12,
-        paddingLeft: 12,
+        paddingLeft: 28,
         gap: 6,
         position: 'relative',
         userSelect: 'none',
+        background: showHoverFill ? `${lane.color}0A` : 'transparent',
+        borderRight: `2px solid ${showHoverFill ? lane.color + '55' : 'transparent'}`,
+        cursor: dragging ? 'grabbing' : (commentMode ? 'inherit' : (readOnly ? 'default' : 'pointer')),
+        transition: 'background var(--transition-fast), border-color var(--transition-fast)',
       }}
     >
+      {/* Drag grip — left side */}
+      <div
+        title="Drag to reorder"
+        style={{
+          position: 'absolute',
+          left: 6,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          color: 'var(--text-muted)',
+          opacity: showGrip ? 1 : 0,
+          transition: 'opacity var(--transition-fast)',
+          display: 'flex',
+          alignItems: 'center',
+          padding: 2,
+          borderRadius: 4,
+          pointerEvents: 'none',
+        }}
+      >
+        <GripVertical size={12} />
+      </div>
+
       {editing ? (
         <input
           autoFocus
@@ -59,6 +144,7 @@ export const StatusLaneLabelNode = memo(({ data }: NodeProps) => {
             if (e.key === 'Escape') { setDraft(lane.name); setEditing(false); }
           }}
           onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
           style={{
             flex: 1,
             border: 'none',
@@ -73,7 +159,7 @@ export const StatusLaneLabelNode = memo(({ data }: NodeProps) => {
         />
       ) : (
         <span
-          onDoubleClick={() => { if (!readOnly) setEditing(true); }}
+          onDoubleClick={(e) => { if (!readOnly) { e.stopPropagation(); setEditing(true); } }}
           title={readOnly ? lane.name : 'Double-click to rename'}
           style={{
             fontSize: 13,
@@ -88,23 +174,24 @@ export const StatusLaneLabelNode = memo(({ data }: NodeProps) => {
           {lane.name}
         </span>
       )}
-      {!readOnly && hovered && !editing && (
-        <div style={{ display: 'flex', gap: 4, position: 'absolute', right: -4, top: 4 }}>
-          <button
-            onClick={(e) => { e.stopPropagation(); updateStatusLane(lane.id, { visible: !lane.visible }); }}
-            title={lane.visible ? 'Hide lane' : 'Show lane'}
-            style={iconBtnStyle}
-          >
-            {lane.visible ? <Eye size={11} /> : <EyeOff size={11} />}
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); removeStatusLane(lane.id); }}
-            title="Delete lane"
-            style={iconBtnStyle}
-          >
-            <Trash2 size={11} />
-          </button>
-        </div>
+      <CommentBadge
+        anchor={{ type: 'statusLane', id: lane.id }}
+        style={{ position: 'absolute', top: -6, right: -8 }}
+      />
+      {selected && !readOnly && !editing && (
+        <LaneLabelControls
+          color={lane.color}
+          onPickColor={(c) => updateStatusLane(lane.id, { color: c })}
+          onDelete={() => setConfirming(true)}
+        />
+      )}
+      {confirming && (
+        <ConfirmDeleteModal
+          title="Delete status lane?"
+          description={`"${lane.name}" and all its segments will be removed.`}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => { removeStatusLane(lane.id); setConfirming(false); }}
+        />
       )}
     </div>
   );
@@ -118,13 +205,25 @@ export const TimelineLaneLabelNode = memo(({ data }: NodeProps) => {
   const { lane, height } = data as TimelineLaneLabelData;
   const updateTimelineLane = useBlueprintStore((s) => s.updateTimelineLane);
   const removeTimelineLane = useBlueprintStore((s) => s.removeTimelineLane);
+  const reorderTimelineLane = useBlueprintStore((s) => s.reorderTimelineLane);
+  const setSelectedLaneId = useBlueprintStore((s) => s.setSelectedLaneId);
+  const selectedLaneId = useBlueprintStore((s) => s.selectedLaneId);
   const presentMode = useBlueprintStore((s) => s.presentMode);
   const isGuestView = useBlueprintStore((s) => s.isGuestView);
-  const readOnly = presentMode || isGuestView;
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
+  const openThread = useCommentsStore((s) => s.openThread);
+  const readOnly = presentMode || isGuestView || commentMode || isCollaboratorView;
+  const selected = selectedLaneId === lane.id;
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(lane.name);
   const [hovered, setHovered] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const dragStartY = useRef(0);
+  const didDrag = useRef(false);
+  const threshold = height * 0.6;
 
   useEffect(() => { setDraft(lane.name); }, [lane.name]);
 
@@ -135,10 +234,55 @@ export const TimelineLaneLabelNode = memo(({ data }: NodeProps) => {
     setEditing(false);
   };
 
+  const onDivMouseDown = useCallback((e: React.MouseEvent) => {
+    if (readOnly || editing) return;
+    e.stopPropagation();
+    dragStartY.current = e.clientY;
+    didDrag.current = false;
+    setDragging(true);
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientY - dragStartY.current;
+      if (delta > threshold) {
+        didDrag.current = true;
+        reorderTimelineLane(lane.id, 'down');
+        dragStartY.current = ev.clientY;
+      } else if (delta < -threshold) {
+        didDrag.current = true;
+        reorderTimelineLane(lane.id, 'up');
+        dragStartY.current = ev.clientY;
+      }
+    };
+
+    const onUp = () => {
+      setDragging(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [lane.id, reorderTimelineLane, threshold, readOnly, editing]);
+
+  const showGrip = !readOnly && (hovered || dragging);
+  const showHoverFill = !readOnly && (hovered || dragging || selected);
+
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onMouseDown={onDivMouseDown}
+      onClick={(e) => {
+        if (didDrag.current) return;
+        if (commentMode) {
+          e.stopPropagation();
+          openThread({ type: 'timelineLane', id: lane.id }, { x: e.clientX, y: e.clientY });
+          return;
+        }
+        if (readOnly) return;
+        e.stopPropagation();
+        setSelectedLaneId(lane.id);
+      }}
       style={{
         width: ACTOR_LABEL_WIDTH,
         height,
@@ -146,11 +290,35 @@ export const TimelineLaneLabelNode = memo(({ data }: NodeProps) => {
         alignItems: 'center',
         justifyContent: 'flex-end',
         paddingRight: 12,
-        paddingLeft: 12,
+        paddingLeft: 28,
         position: 'relative',
         userSelect: 'none',
+        background: showHoverFill ? `${lane.color}0A` : 'transparent',
+        borderRight: `2px solid ${showHoverFill ? lane.color + '55' : 'transparent'}`,
+        cursor: dragging ? 'grabbing' : (commentMode ? 'inherit' : (readOnly ? 'default' : 'pointer')),
+        transition: 'background var(--transition-fast), border-color var(--transition-fast)',
       }}
     >
+      <div
+        title="Drag to reorder"
+        style={{
+          position: 'absolute',
+          left: 6,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          color: 'var(--text-muted)',
+          opacity: showGrip ? 1 : 0,
+          transition: 'opacity var(--transition-fast)',
+          display: 'flex',
+          alignItems: 'center',
+          padding: 2,
+          borderRadius: 4,
+          pointerEvents: 'none',
+        }}
+      >
+        <GripVertical size={12} />
+      </div>
+
       {editing ? (
         <input
           autoFocus
@@ -162,6 +330,7 @@ export const TimelineLaneLabelNode = memo(({ data }: NodeProps) => {
             if (e.key === 'Escape') { setDraft(lane.name); setEditing(false); }
           }}
           onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
           style={{
             flex: 1,
             border: 'none',
@@ -176,7 +345,7 @@ export const TimelineLaneLabelNode = memo(({ data }: NodeProps) => {
         />
       ) : (
         <span
-          onDoubleClick={() => { if (!readOnly) setEditing(true); }}
+          onDoubleClick={(e) => { if (!readOnly) { e.stopPropagation(); setEditing(true); } }}
           style={{
             fontSize: 12,
             fontWeight: 600,
@@ -190,23 +359,24 @@ export const TimelineLaneLabelNode = memo(({ data }: NodeProps) => {
           {lane.name}
         </span>
       )}
-      {!readOnly && hovered && !editing && (
-        <div style={{ display: 'flex', gap: 4, position: 'absolute', right: -4, top: 2 }}>
-          <button
-            onClick={(e) => { e.stopPropagation(); updateTimelineLane(lane.id, { visible: !lane.visible }); }}
-            title={lane.visible ? 'Hide lane' : 'Show lane'}
-            style={iconBtnStyle}
-          >
-            {lane.visible ? <Eye size={11} /> : <EyeOff size={11} />}
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); removeTimelineLane(lane.id); }}
-            title="Delete lane"
-            style={iconBtnStyle}
-          >
-            <Trash2 size={11} />
-          </button>
-        </div>
+      <CommentBadge
+        anchor={{ type: 'timelineLane', id: lane.id }}
+        style={{ position: 'absolute', top: -6, right: -8 }}
+      />
+      {selected && !readOnly && !editing && (
+        <LaneLabelControls
+          color={lane.color}
+          onPickColor={(c) => updateTimelineLane(lane.id, { color: c })}
+          onDelete={() => setConfirming(true)}
+        />
+      )}
+      {confirming && (
+        <ConfirmDeleteModal
+          title="Delete timeline lane?"
+          description={`"${lane.name}" and all its segments will be removed.`}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => { removeTimelineLane(lane.id); setConfirming(false); }}
+        />
       )}
     </div>
   );
@@ -217,74 +387,156 @@ export const TimelineLaneLabelNode = memo(({ data }: NodeProps) => {
 type LaneBodyData = {
   laneId: string;
   kind: 'status' | 'timeline';
+  color: string;
   width: number;
   height: number;
   totalColumns: number;
   segments: LaneSegment[];
 };
 
+// LaneBodyNode supports two interactions:
+//   - Click-without-drag → 1-column segment at that col (existing behavior).
+//   - Click-and-drag → segment spanning [min(start,end), max(start,end)] cols.
+// Live preview (during hover OR drag) uses the lane's color so the user sees
+// the segment "previewed" in its eventual color.
+
 export const LaneBodyNode = memo(({ data }: NodeProps) => {
-  const { laneId, kind, width, height, totalColumns, segments } = data as LaneBodyData;
+  const { laneId, kind, color, width, height, totalColumns, segments } = data as LaneBodyData;
   const addStatusSegment = useBlueprintStore((s) => s.addStatusSegment);
   const addTimelineSegment = useBlueprintStore((s) => s.addTimelineSegment);
+  const setSelectedLaneSegment = useBlueprintStore((s) => s.setSelectedLaneSegment);
+  const setSelectedLaneId = useBlueprintStore((s) => s.setSelectedLaneId);
   const presentMode = useBlueprintStore((s) => s.presentMode);
   const isGuestView = useBlueprintStore((s) => s.isGuestView);
-  const readOnly = presentMode || isGuestView;
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const readOnly = presentMode || isGuestView || commentMode;
   const rf = useReactFlow();
 
   const [hoverCol, setHoverCol] = useState<number | null>(null);
+  const [drawRange, setDrawRange] = useState<{ start: number; end: number } | null>(null);
 
-  const isOccupied = (col: number) =>
-    segments.some((s) => col >= s.startCol && col <= s.endCol);
+  const isOccupied = useCallback((col: number) =>
+    segments.some((s) => col >= s.startCol && col <= s.endCol),
+    [segments]);
+
+  // Clamp a target col to skip over occupied columns relative to an anchor:
+  // walk from anchor toward target, stop one col before the first occupied col.
+  const clampThroughOccupied = useCallback((anchor: number, target: number): number => {
+    if (anchor === target) return target;
+    const dir = target > anchor ? 1 : -1;
+    let last = anchor;
+    for (let c = anchor + dir; (dir > 0 ? c <= target : c >= target); c += dir) {
+      if (c < 0 || c >= totalColumns) break;
+      if (isOccupied(c)) break;
+      last = c;
+    }
+    return last;
+  }, [isOccupied, totalColumns]);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    if (readOnly) return;
+    if (e.button !== 0) return;
+    const flowPos = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const startCol = getColFromX(flowPos.x, totalColumns);
+    if (startCol < 0 || startCol >= totalColumns) return;
+    if (isOccupied(startCol)) return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    // Deselect any selected segment / lane so toolbars don't flicker
+    setSelectedLaneSegment(null);
+    setSelectedLaneId(null);
+
+    let didDrag = false;
+    let currentEnd = startCol;
+    setDrawRange({ start: startCol, end: startCol });
+
+    const onMove = (ev: MouseEvent) => {
+      const fp = rf.screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+      const rawCol = getColFromX(fp.x, totalColumns);
+      const clampedCol = Math.max(0, Math.min(totalColumns - 1, rawCol));
+      const endCol = clampThroughOccupied(startCol, clampedCol);
+      if (endCol !== currentEnd) didDrag = true;
+      currentEnd = endCol;
+      setDrawRange({ start: startCol, end: endCol });
+    };
+
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        cleanup();
+        setDrawRange(null);
+      }
+    };
+
+    const cleanup = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('keydown', onKey);
+    };
+
+    const onUp = () => {
+      cleanup();
+      const minCol = Math.min(startCol, currentEnd);
+      const maxCol = Math.max(startCol, currentEnd);
+      setDrawRange(null);
+      // Click-without-drag → single-column segment at startCol (existing UX);
+      // drag → multi-column segment.
+      if (!didDrag) {
+        if (kind === 'status') addStatusSegment(laneId, startCol, startCol);
+        else addTimelineSegment(laneId, startCol, startCol);
+      } else {
+        if (kind === 'status') addStatusSegment(laneId, minCol, maxCol);
+        else addTimelineSegment(laneId, minCol, maxCol);
+      }
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('keydown', onKey);
+  }, [readOnly, rf, totalColumns, isOccupied, clampThroughOccupied, kind, laneId, addStatusSegment, addTimelineSegment, setSelectedLaneSegment, setSelectedLaneId]);
 
   const onMove = (e: React.MouseEvent) => {
-    if (readOnly) return;
+    if (readOnly || drawRange) return;
     const flowPos = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
     const col = getColFromX(flowPos.x, totalColumns);
     setHoverCol(col);
   };
 
-  const onClick = (e: React.MouseEvent) => {
-    if (readOnly) return;
-    e.stopPropagation();
-    const flowPos = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    const col = getColFromX(flowPos.x, totalColumns);
-    if (isOccupied(col)) return;
-    if (kind === 'status') addStatusSegment(laneId, col, col);
-    else addTimelineSegment(laneId, col, col);
-  };
-
   const blocked = hoverCol !== null && isOccupied(hoverCol);
+  const previewMin = drawRange ? Math.min(drawRange.start, drawRange.end) : hoverCol;
+  const previewMax = drawRange ? Math.max(drawRange.start, drawRange.end) : hoverCol;
+  const showPreview = !readOnly && previewMin !== null && previewMax !== null && (drawRange || !blocked);
 
   return (
     <div
       onMouseMove={onMove}
-      onMouseLeave={() => setHoverCol(null)}
-      onClick={onClick}
+      onMouseLeave={() => { if (!drawRange) setHoverCol(null); }}
+      onMouseDown={onMouseDown}
       style={{
         width,
         height,
         position: 'relative',
-        cursor: readOnly ? 'default' : (blocked ? 'not-allowed' : 'copy'),
+        cursor: readOnly ? 'default' : (blocked && !drawRange ? 'not-allowed' : 'copy'),
       }}
     >
-      {hoverCol !== null && !readOnly && !blocked && (
+      {showPreview && previewMin !== null && previewMax !== null && (
         <div
           style={{
             position: 'absolute',
-            left: hoverCol * PHASE_WIDTH,
+            left: previewMin * PHASE_WIDTH,
             top: 4,
-            width: PHASE_WIDTH,
+            width: (previewMax - previewMin + 1) * PHASE_WIDTH,
             height: height - 8,
-            background: 'var(--accent-primary-soft)',
-            border: '1px dashed var(--accent-primary)',
+            background: `${color}1A`,
+            border: `1px dashed ${color}`,
             borderRadius: 'var(--radius-md)',
-            opacity: 0.6,
+            opacity: drawRange ? 0.85 : 0.6,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'var(--accent-primary)',
+            color,
             pointerEvents: 'none',
+            transition: drawRange ? 'none' : 'left 0.1s, width 0.1s',
           }}
         >
           <Plus size={14} />
@@ -315,7 +567,9 @@ export const StatusSegmentNode = memo(({ data }: NodeProps) => {
   const selectedLaneSegmentId = useBlueprintStore((s) => s.selectedLaneSegmentId);
   const presentMode = useBlueprintStore((s) => s.presentMode);
   const isGuestView = useBlueprintStore((s) => s.isGuestView);
-  const readOnly = presentMode || isGuestView;
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const openThread = useCommentsStore((s) => s.openThread);
+  const readOnly = presentMode || isGuestView || commentMode;
   const rf = useReactFlow();
 
   const selected = selectedLaneSegmentId === segment.id;
@@ -345,6 +599,11 @@ export const StatusSegmentNode = memo(({ data }: NodeProps) => {
   return (
     <div
       onMouseLeave={() => { setHoveredEdge(null); }}
+      onClick={(e) => {
+        if (!commentMode) return;
+        e.stopPropagation();
+        openThread({ type: 'statusSegment', id: segment.id }, { x: e.clientX, y: e.clientY });
+      }}
       onDoubleClick={(e) => {
         if (readOnly) return;
         e.stopPropagation();
@@ -358,6 +617,10 @@ export const StatusSegmentNode = memo(({ data }: NodeProps) => {
         position: 'relative',
       }}
     >
+      <CommentBadge
+        anchor={{ type: 'statusSegment', id: segment.id }}
+        style={{ position: 'absolute', top: -2, right: -2, zIndex: 8 }}
+      />
       <div
         onMouseDown={(e) => drag.onBodyDown(e)}
         style={{
@@ -459,16 +722,25 @@ export const StatusSegmentNode = memo(({ data }: NodeProps) => {
         )}
       </div>
 
-      {/* Delete button — only when SELECTED */}
+      {/* Selected controls — color picker + delete */}
       {!readOnly && selected && !editing && !drag.dragging && (
-        <button
-          onClick={(e) => { e.stopPropagation(); removeStatusSegment(laneId, segment.id); }}
-          onMouseDown={(e) => e.stopPropagation()}
-          title="Delete"
-          style={{ ...iconBtnStyle, position: 'absolute', top: -2, right: -2, background: 'var(--surface-bg)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-sm)', zIndex: 7 }}
-        >
-          <Trash2 size={10} />
-        </button>
+        <>
+          <SegmentColorPicker
+            currentColor={color}
+            hasOverride={segment.color !== undefined}
+            onPick={(c) => updateStatusSegment(laneId, segment.id, { color: c })}
+            onReset={() => updateStatusSegment(laneId, segment.id, { color: undefined })}
+            anchorStyle={{ position: 'absolute', top: -2, right: 22, zIndex: 7 }}
+          />
+          <button
+            onClick={(e) => { e.stopPropagation(); removeStatusSegment(laneId, segment.id); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            title="Delete"
+            style={{ ...iconBtnStyle, position: 'absolute', top: -2, right: -2, background: 'var(--surface-bg)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-sm)', zIndex: 7 }}
+          >
+            <Trash2 size={10} />
+          </button>
+        </>
       )}
     </div>
   );
@@ -495,7 +767,9 @@ export const TimelineSegmentNode = memo(({ data }: NodeProps) => {
   const selectedLaneSegmentId = useBlueprintStore((s) => s.selectedLaneSegmentId);
   const presentMode = useBlueprintStore((s) => s.presentMode);
   const isGuestView = useBlueprintStore((s) => s.isGuestView);
-  const readOnly = presentMode || isGuestView;
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const openThread = useCommentsStore((s) => s.openThread);
+  const readOnly = presentMode || isGuestView || commentMode;
   const rf = useReactFlow();
 
   const selected = selectedLaneSegmentId === segment.id;
@@ -524,6 +798,11 @@ export const TimelineSegmentNode = memo(({ data }: NodeProps) => {
   return (
     <div
       onMouseLeave={() => { setHoveredEdge(null); }}
+      onClick={(e) => {
+        if (!commentMode) return;
+        e.stopPropagation();
+        openThread({ type: 'timelineSegment', id: segment.id }, { x: e.clientX, y: e.clientY });
+      }}
       onDoubleClick={(e) => {
         if (readOnly) return;
         e.stopPropagation();
@@ -535,6 +814,10 @@ export const TimelineSegmentNode = memo(({ data }: NodeProps) => {
         position: 'relative',
       }}
     >
+      <CommentBadge
+        anchor={{ type: 'timelineSegment', id: segment.id }}
+        style={{ position: 'absolute', top: -8, right: -2, zIndex: 8 }}
+      />
       <div
         onMouseDown={(e) => drag.onBodyDown(e)}
         style={{
@@ -659,14 +942,23 @@ export const TimelineSegmentNode = memo(({ data }: NodeProps) => {
       </div>
 
       {!readOnly && selected && !editing && !drag.dragging && (
-        <button
-          onClick={(e) => { e.stopPropagation(); removeTimelineSegment(laneId, segment.id); }}
-          onMouseDown={(e) => e.stopPropagation()}
-          title="Delete"
-          style={{ ...iconBtnStyle, position: 'absolute', top: -6, right: -6, background: 'var(--surface-bg)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-sm)', zIndex: 7 }}
-        >
-          <Trash2 size={10} />
-        </button>
+        <>
+          <SegmentColorPicker
+            currentColor={color}
+            hasOverride={segment.color !== undefined}
+            onPick={(c) => updateTimelineSegment(laneId, segment.id, { color: c })}
+            onReset={() => updateTimelineSegment(laneId, segment.id, { color: undefined })}
+            anchorStyle={{ position: 'absolute', top: -6, right: 18, zIndex: 7 }}
+          />
+          <button
+            onClick={(e) => { e.stopPropagation(); removeTimelineSegment(laneId, segment.id); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            title="Delete"
+            style={{ ...iconBtnStyle, position: 'absolute', top: -6, right: -6, background: 'var(--surface-bg)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-sm)', zIndex: 7 }}
+          >
+            <Trash2 size={10} />
+          </button>
+        </>
       )}
     </div>
   );
@@ -856,6 +1148,171 @@ function useDragHandle(opts: {
     mode === 'left' ? 'left' : mode === 'right' ? 'right' : null;
 
   return { dragging, mode, activeEdge, onBodyDown, onEdgeDown };
+}
+
+// ─── Lane label controls (Trash + Color picker, outside left of label) ──────
+// Rendered when a lane is selected. Positioned to the LEFT of the lane label
+// (outside the highlighted ACTOR_LABEL_WIDTH region) so the controls don't sit
+// on top of the lane name. Trash is outermost; color picker sits between trash
+// and the label.
+
+function LaneLabelControls({ color, onPickColor, onDelete }: {
+  color: string;
+  onPickColor: (color: string) => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: 'absolute',
+        right: '100%',
+        top: '50%',
+        transform: 'translateY(-50%)',
+        marginRight: 8,
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center',
+        pointerEvents: 'all',
+      }}
+    >
+      <button
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        title="Delete lane"
+        style={laneCtrlBtnStyle('danger')}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.12)'; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.06)'; }}
+      >
+        <Trash2 size={12} />
+      </button>
+      <SegmentColorPicker
+        currentColor={color}
+        hasOverride={false}
+        onPick={onPickColor}
+        onReset={() => {}}
+        anchorStyle={{ position: 'relative' }}
+        popoverStyle={{ top: 'calc(100% + 6px)', right: 'auto', left: 0 }}
+        buttonContent={<div style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />}
+        buttonStyleOverride={laneCtrlBtnStyle('neutral')}
+      />
+    </div>
+  );
+}
+
+function laneCtrlBtnStyle(variant: 'danger' | 'neutral'): React.CSSProperties {
+  if (variant === 'danger') {
+    return {
+      width: 24,
+      height: 24,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 0,
+      color: 'var(--accent-danger)',
+      background: 'rgba(239,68,68,0.06)',
+      border: '1px solid rgba(239,68,68,0.15)',
+      borderRadius: 'var(--radius-md)',
+      cursor: 'pointer',
+      transition: 'background 0.15s',
+    };
+  }
+  return {
+    width: 24,
+    height: 24,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
+    background: 'var(--surface-bg)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: 'var(--radius-md)',
+    boxShadow: 'var(--shadow-sm)',
+    cursor: 'pointer',
+  };
+}
+
+// ─── Segment color picker ─────────────────────────────────────────────────────
+// Small swatch button + 6-color popover. Click swatch → popover; click color →
+// patch segment.color; click reset → patch segment.color = undefined (falls
+// back to lane color via `seg.color ?? lane.color` in layout.ts).
+
+const SEGMENT_PALETTE = ['#3B82F6', '#14B8A6', '#F59E0B', '#8B5CF6', '#EC4899', '#10B981', '#EF4444', '#6B7280'];
+
+function SegmentColorPicker({ currentColor, hasOverride, onPick, onReset, anchorStyle, popoverStyle, buttonContent, buttonStyleOverride }: {
+  currentColor: string;
+  hasOverride: boolean;
+  onPick: (color: string) => void;
+  onReset: () => void;
+  anchorStyle: React.CSSProperties;
+  popoverStyle?: React.CSSProperties;
+  buttonContent?: React.ReactNode;
+  buttonStyleOverride?: React.CSSProperties;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        onMouseDown={(e) => e.stopPropagation()}
+        title="Change colour"
+        style={{
+          ...iconBtnStyle,
+          ...anchorStyle,
+          background: 'var(--surface-bg)',
+          border: '1px solid var(--border-subtle)',
+          boxShadow: 'var(--shadow-sm)',
+          color: currentColor,
+          ...buttonStyleOverride,
+        }}
+      >
+        {buttonContent ?? <Palette size={10} />}
+      </button>
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            top: -36,
+            right: -2,
+            display: 'flex',
+            gap: 4,
+            padding: 6,
+            background: 'var(--surface-bg)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: 'var(--shadow-md)',
+            zIndex: 12,
+            ...popoverStyle,
+          }}
+        >
+          {SEGMENT_PALETTE.map((c) => (
+            <button
+              key={c}
+              onClick={() => { onPick(c); setOpen(false); }}
+              style={{
+                width: 14, height: 14, borderRadius: '50%',
+                background: c,
+                border: c === currentColor ? '2px solid var(--text-primary)' : 'none',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            />
+          ))}
+          {hasOverride && (
+            <button
+              onClick={() => { onReset(); setOpen(false); }}
+              title="Reset to lane colour"
+              style={{ ...iconBtnStyle, color: 'var(--text-muted)' }}
+            >
+              <RotateCcw size={10} />
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 // ─── Shared styles ────────────────────────────────────────────────────────────

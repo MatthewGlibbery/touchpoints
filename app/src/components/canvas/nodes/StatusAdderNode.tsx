@@ -4,18 +4,27 @@ import { Plus } from 'lucide-react';
 import { ACTOR_LABEL_WIDTH } from '../../../lib/layout';
 import { useBlueprintStore } from '../../../store/blueprint.store';
 
-export const ActorAdderNode = memo((_: NodeProps) => {
-  const addActor = useBlueprintStore((s) => s.addActor);
+type Data = { height: number };
+
+export const StatusAdderNode = memo(({ data }: NodeProps) => {
+  const { height } = data as Data;
+  const addStatusLane = useBlueprintStore((s) => s.addStatusLane);
+  const blueprint = useBlueprintStore((s) => s.blueprint);
   const [hovered, setHovered] = useState(false);
+
+  const onAdd = () => {
+    const count = (blueprint?.statusLanes?.length ?? 0) + 1;
+    addStatusLane(`Status ${count}`);
+  };
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={() => addActor('New actor')}
+      onClick={onAdd}
       style={{
         width: ACTOR_LABEL_WIDTH,
-        height: 40,
+        height,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -33,7 +42,7 @@ export const ActorAdderNode = memo((_: NodeProps) => {
       }}
     >
       <Plus size={12} />
-      Add actor
+      Add status
     </div>
   );
 });

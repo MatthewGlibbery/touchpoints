@@ -3,7 +3,7 @@ import { X, RefreshCw, Loader2 } from 'lucide-react';
 import { ReactFlow, Background, BackgroundVariant } from '@xyflow/react';
 import type { ReactFlowInstance, Viewport } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { nodeTypes } from './nodeTypes';
+import { nodeTypes, edgeTypes } from './nodeTypes';
 import { useBlueprintStore, buildOverviewBlueprint } from '../../store/blueprint.store';
 import { blueprintToFlow, getBlueprintForVersion } from '../../lib/layout';
 
@@ -87,6 +87,7 @@ export function SplitCanvas() {
 
   const rfProps = {
     nodeTypes,
+    edgeTypes,
     nodesDraggable: false,
     nodesConnectable: false,
     elementsSelectable: false,

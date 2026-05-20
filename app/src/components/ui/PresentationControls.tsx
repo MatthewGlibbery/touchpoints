@@ -25,6 +25,34 @@ export function PresentationControls() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keyboard slide navigation: ←/→ steps, Home/End jump, Esc exits.
+  // Skipped while focus is inside an editable field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+        e.preventDefault();
+        goTo(useBlueprintStore.getState().currentKeyframeIndex + 1);
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        goTo(useBlueprintStore.getState().currentKeyframeIndex - 1);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        goTo(0);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        goTo(total - 1);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleExit();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total]);
+
   const goTo = (idx: number) => {
     const clamped = Math.max(0, Math.min(total - 1, idx));
     const kf = keyframes[clamped];

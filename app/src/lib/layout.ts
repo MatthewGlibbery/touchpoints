@@ -113,13 +113,24 @@ function visibleTimelineLanes(blueprint: Blueprint, isOverview: boolean) {
 export function computeLaneOffsets(blueprint: Blueprint, isOverview: boolean) {
   const tLanes = visibleTimelineLanes(blueprint, isOverview);
   const sLanes = visibleStatusLanes(blueprint, isOverview);
-  const timelineRegionHeight = tLanes.length * TIMELINE_LANE_HEIGHT;
-  const statusRegionHeight = sLanes.length * STATUS_LANE_HEIGHT;
+  // In edit/normal mode, always reserve one extra row at the end of each region
+  // for the "+ Add timeline" / "+ Add status" adder button (same row height as
+  // a real lane). In overview mode, lanes are hidden entirely.
+  const timelineLanesHeight = tLanes.length * TIMELINE_LANE_HEIGHT;
+  const statusLanesHeight = sLanes.length * STATUS_LANE_HEIGHT;
+  const timelineAdderHeight = isOverview ? 0 : TIMELINE_LANE_HEIGHT;
+  const statusAdderHeight = isOverview ? 0 : STATUS_LANE_HEIGHT;
+  const timelineRegionHeight = timelineLanesHeight + timelineAdderHeight;
+  const statusRegionHeight = statusLanesHeight + statusAdderHeight;
   return {
     tLanes,
     sLanes,
     timelineRegionHeight,
     statusRegionHeight,
+    timelineLanesHeight,
+    statusLanesHeight,
+    timelineAdderHeight,
+    statusAdderHeight,
     phaseHeaderY: timelineRegionHeight,
     statusRegionY: timelineRegionHeight + PHASE_HEADER_HEIGHT,
     actorRegionY: timelineRegionHeight + PHASE_HEADER_HEIGHT + statusRegionHeight,
@@ -172,6 +183,7 @@ export function blueprintToFlow(
       data: {
         laneId: lane.id,
         kind: 'timeline' as const,
+        color: lane.color,
         width: totalCanvasWidth,
         height: TIMELINE_LANE_HEIGHT,
         totalColumns,
@@ -206,6 +218,18 @@ export function blueprintToFlow(
     });
   });
 
+  // ─── Timeline adder row (left column, end of timeline region) ─────────────
+  if (!isOverview && lanes.timelineAdderHeight > 0) {
+    nodes.push({
+      id: 'add-timeline-btn',
+      type: 'timelineAdder',
+      position: { x: 0, y: lanes.timelineLanesHeight },
+      data: { height: TIMELINE_LANE_HEIGHT },
+      draggable: false, selectable: false, zIndex: 5,
+      style: { pointerEvents: 'all' },
+    });
+  }
+
   // ─── Phase headers ────────────────────────────────────────────────────────
   sortedPhases.forEach((phase) => {
     const col = phaseColumns.get(phase.id)!;
@@ -237,6 +261,7 @@ export function blueprintToFlow(
       data: {
         laneId: lane.id,
         kind: 'status' as const,
+        color: lane.color,
         width: totalCanvasWidth,
         height: STATUS_LANE_HEIGHT,
         totalColumns,
@@ -269,6 +294,18 @@ export function blueprintToFlow(
       });
     });
   });
+
+  // ─── Status adder row (left column, end of status region) ─────────────────
+  if (!isOverview && lanes.statusAdderHeight > 0) {
+    nodes.push({
+      id: 'add-status-btn',
+      type: 'statusAdder',
+      position: { x: 0, y: lanes.statusRegionY + lanes.statusLanesHeight },
+      data: { height: STATUS_LANE_HEIGHT },
+      draggable: false, selectable: false, zIndex: 5,
+      style: { pointerEvents: 'all' },
+    });
+  }
 
   // ─── Swimlane backgrounds ─────────────────────────────────────────────────
   sortedActors.forEach((actor, i) => {
@@ -470,6 +507,7 @@ export function blueprintToFlow(
             strokeDasharray: meta?.flowType === 'decision' ? '6 3' : undefined,
           },
           markerEnd: { type: MarkerType.ArrowClosed, width: 8, height: 8, color },
+          data: { labelOffset: meta?.labelOffset },
         });
       }
     });
@@ -504,6 +542,7 @@ export function blueprintToFlow(
           strokeDasharray: meta?.flowType === 'decision' ? '6 3' : undefined,
         },
         markerEnd: { type: MarkerType.ArrowClosed, width: 8, height: 8, color },
+        data: { labelOffset: meta?.labelOffset },
       });
     }
   });
@@ -536,6 +575,7 @@ export function blueprintToFlow(
           strokeWidth: 1.5,
           strokeDasharray: meta?.flowType === 'decision' ? '6 3' : undefined,
         },
+        data: { labelOffset: meta?.labelOffset },
       });
     }
   });
@@ -558,6 +598,7 @@ export function blueprintToFlow(
         strokeDasharray: meta?.flowType === 'decision' ? '6 3' : undefined,
       },
       markerEnd: { type: MarkerType.ArrowClosed, width: 8, height: 8, color },
+      data: { labelOffset: meta?.labelOffset },
     });
   });
 

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { sendOTP, verifyOTP } from '../../lib/auth';
 import { useBlueprintStore } from '../../store/blueprint.store';
-import { GitBranch, ArrowRight, RotateCcw, Upload, Mail } from 'lucide-react';
+import { GitBranch, ArrowRight, RotateCcw, Upload, Mail, User } from 'lucide-react';
 
 // ─── Canvas dot background (same as OnboardingOverlay) ───────────────────────
 
@@ -139,29 +139,54 @@ function MigrationStep({ count, loading, onConfirm, onSkip }: {
 
 // ─── AuthScreen ───────────────────────────────────────────────────────────────
 
-type Step = 'email' | 'sent' | 'migration';
+type Step = 'email' | 'sent' | 'name-capture' | 'migration';
 
 export function AuthScreen() {
   const pendingMigration = useBlueprintStore((s) => s.pendingMigration);
+  const pendingNameCapture = useBlueprintStore((s) => s.pendingNameCapture);
   const confirmMigration = useBlueprintStore((s) => s.confirmMigration);
   const skipMigration = useBlueprintStore((s) => s.skipMigration);
+  const submitDisplayName = useBlueprintStore((s) => s.submitDisplayName);
 
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
+  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const emailRef = useRef<HTMLInputElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { emailRef.current?.focus(); }, []);
   useEffect(() => { if (step === 'sent') codeRef.current?.focus(); }, [step]);
+  useEffect(() => { if (step === 'name-capture') nameRef.current?.focus(); }, [step]);
 
-  // When the store detects blueprints to migrate, show the migration step
+  // Drive step from store flags (name capture takes priority over migration)
   useEffect(() => {
-    if (pendingMigration && pendingMigration.length > 0) setStep('migration');
-  }, [pendingMigration]);
+    if (pendingNameCapture) setStep('name-capture');
+    else if (pendingMigration && pendingMigration.length > 0) setStep('migration');
+  }, [pendingNameCapture, pendingMigration]);
+
+  async function handleNameSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (trimmed.length < 1) {
+      setError('Enter a name');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await submitDisplayName(trimmed);
+      // Store will route to onboarding/canvas (or to migration step)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save name');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleEmailSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -373,6 +398,40 @@ export function AuthScreen() {
               }}
             >
               <RotateCcw size={11} /> Use a different email
+            </button>
+          </form>
+        ) : step === 'name-capture' ? (
+          <form onSubmit={handleNameSubmit}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 48, height: 48, borderRadius: '50%',
+              background: 'var(--accent-primary-soft)',
+              margin: '0 auto 16px',
+            }}>
+              <User size={22} color="var(--accent-primary)" />
+            </div>
+            <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8, textAlign: 'center' }}>
+              What should we call you?
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 20, textAlign: 'center' }}>
+              This name appears on your comments and notifications.
+            </p>
+            <input
+              ref={nameRef}
+              type="text"
+              placeholder="Your name"
+              value={name}
+              onChange={(e) => setName(e.target.value.slice(0, 60))}
+              maxLength={60}
+              style={{ ...inputStyle, marginBottom: 12 }}
+              autoComplete="name"
+              required
+            />
+            {error && (
+              <p style={{ fontSize: 12, color: 'var(--accent-danger)', marginBottom: 10 }}>{error}</p>
+            )}
+            <button type="submit" style={btnStyle} disabled={loading || name.trim().length === 0}>
+              {loading ? 'Saving…' : <><span>Continue</span><ArrowRight size={14} /></>}
             </button>
           </form>
         ) : step === 'migration' ? (

@@ -3,7 +3,9 @@ import type { NodeProps } from '@xyflow/react';
 import { GripHorizontal, GitBranch } from 'lucide-react';
 import type { Phase } from '../../../types/blueprint';
 import { useBlueprintStore } from '../../../store/blueprint.store';
+import { useCommentsStore } from '../../../store/comments.store';
 import { PHASE_HEADER_HEIGHT } from '../../../lib/layout';
+import { CommentBadge } from '../../ui/CommentBadge';
 
 type PhaseHeaderData = { phase: Phase; width: number; colCount: number };
 // colCount kept in data for layout reference; column selection now handled by ColumnOverlayNode
@@ -15,6 +17,15 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
   const setPhaseDragOffset = useBlueprintStore((s) => s.setPhaseDragOffset);
   const setSelectedPhase = useBlueprintStore((s) => s.setSelectedPhase);
   const presentMode = useBlueprintStore((s) => s.presentMode);
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const openThread = useCommentsStore((s) => s.openThread);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const headerCenterPos = useCallback((): { x: number; y: number } | null => {
+    const el = headerRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.bottom };
+  }, []);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(phase.name);
@@ -36,7 +47,7 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
   }, [draft, phase.id, phase.name, updatePhase]);
 
   const onDivMouseDown = useCallback((e: React.MouseEvent) => {
-    if (presentMode || editing) return;
+    if (presentMode || editing || commentMode) return;
     e.stopPropagation();
     dragStartX.current = e.clientX;
     didDrag.current = false;
@@ -66,18 +77,23 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [phase.id, movePhase, setPhaseDragOffset, threshold, presentMode, editing]);
+  }, [phase.id, movePhase, setPhaseDragOffset, threshold, presentMode, editing, commentMode]);
 
   const showGrip = (hovered || dragging) && !editing;
 
   return (
     <div
+      ref={headerRef}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onMouseDown={onDivMouseDown}
       onClick={(e) => {
         if (presentMode || editing || didDrag.current) return;
         e.stopPropagation();
+        if (commentMode) {
+          openThread({ type: 'phase', id: phase.id }, headerCenterPos());
+          return;
+        }
         setSelectedPhase(phase.id);
       }}
       style={{
@@ -91,7 +107,7 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
         padding: '0 20px',
         userSelect: 'none',
         position: 'relative',
-        cursor: dragging ? 'grabbing' : (hovered && !editing ? 'grab' : 'default'),
+        cursor: dragging ? 'grabbing' : (editing ? 'text' : 'pointer'),
       }}
     >
       {/* Drag grip — visual affordance */}
@@ -187,6 +203,13 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
         </span>
       )}
 
+      {/* Comment badge — half-off the TOP, kept inside the right edge so it
+          doesn't get clipped by the next phase header's wrapper. */}
+      <CommentBadge
+        anchor={{ type: 'phase', id: phase.id }}
+        getAnchorPos={headerCenterPos}
+        style={{ position: 'absolute', right: 8, top: -10, zIndex: 5 }}
+      />
     </div>
   );
 });

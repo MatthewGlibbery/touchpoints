@@ -24,8 +24,9 @@ export const PhaseAdderNode = memo(() => {
         cursor: 'pointer',
         borderRadius: 'var(--radius-md)',
         background: hovered ? 'var(--surface-bg)' : 'transparent',
-        border: `2px dashed ${hovered ? 'var(--accent-primary)' : 'var(--border-strong)'}`,
+        border: `2px dashed ${hovered ? 'var(--accent-primary)' : 'transparent'}`,
         color: hovered ? 'var(--accent-primary)' : 'var(--text-muted)',
+        opacity: hovered ? 1 : 0.6,
         transition: 'all var(--transition-fast)',
         whiteSpace: 'nowrap',
       }}

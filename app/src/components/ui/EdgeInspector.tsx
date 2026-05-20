@@ -17,6 +17,7 @@ export function EdgeInspector() {
   const setSelectedEdge = useBlueprintStore((s) => s.setSelectedEdge);
   const updateEdgeMeta = useBlueprintStore((s) => s.updateEdgeMeta);
   const removeEdge = useBlueprintStore((s) => s.removeEdge);
+  const commentMode = useBlueprintStore((s) => s.commentMode);
 
   const [labelDraft, setLabelDraft] = useState('');
 
@@ -27,6 +28,7 @@ export function EdgeInspector() {
   }, [selectedEdgeId]);
 
   if (!edgeInspectorOpen || !selectedEdgeId || meta === null) return null;
+  if (commentMode) return null; // Edges open the comment thread instead
 
   const saveLabel = () => {
     const v = labelDraft.trim();

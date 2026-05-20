@@ -82,6 +82,8 @@ export type Opportunity = {
 export type EdgeMeta = {
   label?: string;
   flowType?: 'sequence' | 'dependency' | 'decision';
+  /** Position of the label along the edge path, 0 (source) → 1 (target). Defaults to 0.5 (midpoint). */
+  labelOffset?: number;
 };
 
 export type CustomEdge = {
@@ -178,6 +180,81 @@ export type TimelineLane = {
   order: number;
   visible: boolean;
   segments: LaneSegment[];     // segment label is the duration text e.g. "48 hours"
+};
+
+// ─── Comments / collaborators / notifications ────────────────────────────────
+// Stored in dedicated Supabase tables (see supabase/migrations/20260518_comments.sql).
+// NOT written into Blueprint.data JSONB. Loaded into a separate Zustand slice.
+
+export const COMMENT_REACTION_EMOJIS = ['👍', '❤️', '😂', '🎉', '✅', '🤔'] as const;
+export type CommentReactionEmoji = (typeof COMMENT_REACTION_EMOJIS)[number];
+
+export type CommentAnchorType =
+  | 'action'
+  | 'phase'
+  | 'actor'
+  | 'edge'
+  | 'statusLane'
+  | 'statusSegment'
+  | 'timelineLane'
+  | 'timelineSegment';
+
+export type CommentAnchor = {
+  type: CommentAnchorType;
+  id: string;
+};
+
+export type CommentMention = {
+  userId: string;
+  email: string;
+  name: string;
+};
+
+export type Comment = {
+  id: string;
+  blueprintId: string;          // blueprints.id (DB row), not blueprint.data.id
+  anchor: CommentAnchor;
+  parentCommentId: string | null;
+  authorUserId: string;
+  authorName: string;
+  authorEmail: string;
+  body: string;                 // mentions encoded as @[name](userId)
+  mentions: CommentMention[];
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+  resolvedByUserId: string | null;
+};
+
+export type CommentReaction = {
+  id: string;
+  commentId: string;
+  userId: string;
+  emoji: CommentReactionEmoji;
+  createdAt: string;
+};
+
+export type Collaborator = {
+  id: string;                   // blueprint_collaborators row id
+  blueprintId: string;
+  userId: string | null;        // null until accepted
+  email: string;
+  name: string | null;          // display name (denormalised from auth.user_metadata.display_name)
+  invitedByUserId: string;
+  invitedAt: string;
+  acceptedAt: string | null;
+};
+
+export type Notification = {
+  id: string;
+  userId: string;
+  blueprintId: string;
+  commentId: string | null;
+  kind: 'mention' | 'reply' | 'reaction';
+  snippet: string;
+  actorName: string;
+  readAt: string | null;
+  createdAt: string;
 };
 
 export type Blueprint = {

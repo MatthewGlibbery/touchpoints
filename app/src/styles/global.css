@@ -49,6 +49,24 @@
 .anim-fade-up     { animation: fadeUp       var(--transition-fast)   both; }
 .anim-scale-in    { animation: scaleIn      var(--transition-fast)   both; }
 
+/* ─── Canvas cursors ────────────────────────────────────────────────────────── */
+/* Default arrow on the canvas pane at rest; grabbing while panning (middle/right
+ * drag). Left-drag rubber-band selection keeps the default cursor. Action cards
+ * carry pointer (set inline) and switch to grabbing while ReactFlow's drag is
+ * active — handled here by class so we don't have to thread state through. */
+
+.react-flow__pane,
+.react-flow__pane.draggable {
+  cursor: default !important;
+}
+.react-flow__pane.dragging {
+  cursor: grabbing !important;
+}
+
+.react-flow__node-action.dragging .action-drag-handle {
+  cursor: grabbing !important;
+}
+
 /* ─── Node reorder transitions ──────────────────────────────────────────────── */
 /* Applied via CSS so it reliably targets ReactFlow's wrapper transform.
    BlueprintCanvas overrides with inline transition:none on cursor-driven nodes. */
@@ -100,6 +118,16 @@
 
 .react-flow__edges {
   z-index: 1;
+}
+
+/* ─── Edge reconnection anchors ─────────────────────────────────────────────── */
+/* ReactFlow renders an invisible <circle class="react-flow__edgeupdater"> at
+   each endpoint when `edgesReconnectable` is true. We render our own visible
+   markers in CommentedSmoothStepEdge (pointer-events: none) on top of these
+   anchors so the underlying anchors still handle the reconnection drag. */
+
+body.comment-mode .react-flow__edgeupdater {
+  display: none;
 }
 
 /* ─── Badge pill ────────────────────────────────────────────────────────────── */
@@ -193,4 +221,142 @@ input, textarea {
 .btn-ghost:hover {
   background: var(--surface-bg-hover);
   border-color: var(--border-strong);
+}
+
+/* ─── Comment mode ──────────────────────────────────────────────────────────── */
+
+/* Cursor: comment-bubble icon over the canvas region while in comment mode.
+ * Apply broadly inside .react-flow so child elements (cards, badges, buttons)
+ * don't override with cursor: pointer. Floating chrome (ViewBar, ProjectBar,
+ * popovers) lives outside .react-flow so it keeps normal cursors. */
+body.comment-mode .react-flow,
+body.comment-mode .react-flow *,
+body.comment-mode .react-flow__pane {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='none' stroke='%233B82F6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>") 4 4, crosshair !important;
+}
+
+/* Hover highlight on commentable structural elements */
+body.comment-mode .react-flow__node-action .action-drag-handle,
+body.comment-mode .react-flow__node-phaseHeader,
+body.comment-mode .react-flow__node-actorLabel,
+body.comment-mode .react-flow__node-statusLaneLabel,
+body.comment-mode .react-flow__node-timelineLaneLabel,
+body.comment-mode .react-flow__node-statusSegment,
+body.comment-mode .react-flow__node-timelineSegment {
+  cursor: inherit !important;
+  transition: box-shadow 0.15s, outline 0.15s;
+}
+
+body.comment-mode .react-flow__node-action:hover .action-drag-handle,
+body.comment-mode .react-flow__node-phaseHeader:hover,
+body.comment-mode .react-flow__node-actorLabel:hover,
+body.comment-mode .react-flow__node-statusLaneLabel:hover,
+body.comment-mode .react-flow__node-timelineLaneLabel:hover,
+body.comment-mode .react-flow__node-statusSegment:hover,
+body.comment-mode .react-flow__node-timelineSegment:hover {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.18) !important;
+}
+
+/* Lift hovered phase header above neighbouring headers so the right outline
+ * isn't clipped by the next sibling node. */
+body.comment-mode .react-flow__node-phaseHeader:hover {
+  z-index: 20 !important;
+}
+
+/* Suppress action handles in comment mode (no editing) */
+body.comment-mode .react-flow__node-action .react-flow__handle {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Comment-mode edge hover (route to comment composer) */
+body.comment-mode .react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--accent-primary) !important;
+  stroke-width: 3 !important;
+}
+
+/* Highlight for the structural element a thread is anchored to.
+ * Applied programmatically while the popover is open. */
+.react-flow__node.comment-anchor-active {
+  z-index: 25 !important;
+}
+.react-flow__node-action.comment-anchor-active .action-drag-handle,
+.react-flow__node-phaseHeader.comment-anchor-active,
+.react-flow__node-actorLabel.comment-anchor-active,
+.react-flow__node-statusLaneLabel.comment-anchor-active,
+.react-flow__node-timelineLaneLabel.comment-anchor-active,
+.react-flow__node-statusSegment.comment-anchor-active,
+.react-flow__node-timelineSegment.comment-anchor-active {
+  outline: 2px dashed var(--border-strong);
+  outline-offset: 4px;
+}
+.react-flow__edge.comment-anchor-active .react-flow__edge-path {
+  stroke: var(--accent-primary) !important;
+  stroke-width: 3 !important;
+}
+
+/* ─── Comment thread popover ────────────────────────────────────────────────── */
+
+.comment-thread-popover {
+  position: fixed;
+  z-index: 9500;
+  background: var(--surface-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  width: 340px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: scaleIn var(--transition-fast) both;
+}
+
+.comment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  background: var(--accent-primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.comment-badge.resolved {
+  background: var(--accent-success);
+}
+
+.comment-badge:hover {
+  transform: scale(1.08);
+}
+
+.comment-reaction-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  background: var(--surface-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.comment-reaction-pill.active {
+  background: var(--accent-primary-soft);
+  border-color: var(--accent-primary);
+}
+
+.comment-reaction-pill:hover {
+  background: var(--surface-bg-hover);
 }

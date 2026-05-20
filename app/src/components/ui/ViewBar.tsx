@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { AlertCircle, Lightbulb, HelpCircle, Pencil, X, ChevronDown, Presentation } from 'lucide-react';
+import { AlertCircle, Lightbulb, HelpCircle, Pencil, X, ChevronDown, Presentation, MessageCircle } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import type { Blueprint } from '../../types/blueprint';
 import { Panel, IconButton } from './primitives';
@@ -20,6 +20,8 @@ export function ViewBar() {
   const setPresentationEditMode = useBlueprintStore((s) => s.setPresentationEditMode);
   const presentMode             = useBlueprintStore((s) => s.presentMode);
   const presentationEditMode    = useBlueprintStore((s) => s.presentationEditMode);
+  const commentMode             = useBlueprintStore((s) => s.commentMode);
+  const setCommentMode          = useBlueprintStore((s) => s.setCommentMode);
 
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -50,6 +52,11 @@ export function ViewBar() {
   function handlePresent() {
     setOpen(false);
     setPresentationEditMode(true);
+  }
+
+  function handleComment() {
+    setOpen(false);
+    setCommentMode(!commentMode);
   }
 
   return (
@@ -84,8 +91,8 @@ export function ViewBar() {
               whiteSpace: 'nowrap',
             }}
           >
-            {inPresentation ? <Presentation size={12} /> : currentMeta.icon}
-            {inPresentation ? 'Presenting' : currentMeta.label}
+            {commentMode ? <MessageCircle size={12} /> : inPresentation ? <Presentation size={12} /> : currentMeta.icon}
+            {commentMode ? 'Commenting' : inPresentation ? 'Presenting' : currentMeta.label}
           </button>
           <button
             onClick={() => setOpen((v) => !v)}
@@ -189,6 +196,28 @@ export function ViewBar() {
             >
               <Presentation size={12} />
               <span style={{ flex: 1 }}>Present</span>
+            </button>
+
+            <button
+              onClick={handleComment}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 10px',
+                fontSize: 13,
+                fontWeight: commentMode ? 600 : 400,
+                color: commentMode ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                background: commentMode ? 'var(--accent-primary-soft)' : 'transparent',
+                border: 'none',
+                borderRadius: 'var(--radius-sm)',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <MessageCircle size={12} />
+              <span style={{ flex: 1 }}>{commentMode ? 'Exit comment mode' : 'Comment'}</span>
             </button>
           </div>
         )}

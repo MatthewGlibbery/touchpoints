@@ -8,8 +8,9 @@ import '@xyflow/react/dist/style.css';
 import { Trash2 } from 'lucide-react';
 import { ZoomToolbar } from './ZoomToolbar';
 import { DotBackground } from './DotBackground';
-import { nodeTypes } from './nodeTypes';
+import { nodeTypes, edgeTypes } from './nodeTypes';
 import { ConfirmDeleteModal } from '../ui/ConfirmDeleteModal';
+import { useCommentsStore } from '../../store/comments.store';
 
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { getCellFromPosition, ACTION_NODE_WIDTH, ACTION_NODE_HEIGHT, estimateActionHeight, ACTOR_LABEL_WIDTH, PHASE_WIDTH, computeColumnData, computeActorRowHeights, computeLaneOffsets } from '../../lib/layout';
@@ -27,14 +28,17 @@ export function BlueprintCanvas() {
   const setSelectedEdge = useBlueprintStore((s) => s.setSelectedEdge);
   const setSelectedColumnKey = useBlueprintStore((s) => s.setSelectedColumnKey);
   const setSelectedLaneSegment = useBlueprintStore((s) => s.setSelectedLaneSegment);
+  const setSelectedLaneId = useBlueprintStore((s) => s.setSelectedLaneId);
   const setSelectedPhase = useBlueprintStore((s) => s.setSelectedPhase);
   const setDragOverInserterId = useBlueprintStore((s) => s.setDragOverInserterId);
   const insertSubstep = useBlueprintStore((s) => s.insertSubstep);
   const addCustomEdge = useBlueprintStore((s) => s.addCustomEdge);
   const removeEdge = useBlueprintStore((s) => s.removeEdge);
+  const reconnectEdge = useBlueprintStore((s) => s.reconnectEdge);
   const theme = useBlueprintStore((s) => s.theme);
   const presentMode = useBlueprintStore((s) => s.presentMode);
   const isGuestView = useBlueprintStore((s) => s.isGuestView);
+  const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
   const canvasView = useBlueprintStore((s) => s.canvasView);
   const setCanvasView = useBlueprintStore((s) => s.setCanvasView);
   const actorDragOffset = useBlueprintStore((s) => s.actorDragOffset);
@@ -43,6 +47,7 @@ export function BlueprintCanvas() {
   const setMultiSelectedNodeIds = useBlueprintStore((s) => s.setMultiSelectedNodeIds);
   const overviewMode = useBlueprintStore((s) => s.overviewMode);
   const clearOverviewCell = useBlueprintStore((s) => s.clearOverviewCell);
+  const commentMode = useBlueprintStore((s) => s.commentMode);
 
   // Local node state so ReactFlow can update positions during drag
   const [nodes, setNodes] = useState<Node[]>(storeNodes);
@@ -161,11 +166,16 @@ export function BlueprintCanvas() {
     [blueprint, updateAction, setDragTarget, setDraggingNode, setDragOverInserterId, insertSubstep]
   );
 
+  const openThread = useCommentsStore((s) => s.openThread);
   const onEdgeClick = useCallback(
-    (_event: unknown, edge: { id: string }) => {
+    (event: React.MouseEvent, edge: { id: string }) => {
+      if (commentMode) {
+        openThread({ type: 'edge', id: edge.id }, { x: event.clientX, y: event.clientY });
+        return;
+      }
       setSelectedEdge(edge.id);
     },
-    [setSelectedEdge]
+    [setSelectedEdge, commentMode, openThread]
   );
 
   const onConnect = useCallback(
@@ -184,15 +194,15 @@ export function BlueprintCanvas() {
   const onReconnect = useCallback(
     (oldEdge: Edge, newConnection: Connection) => {
       if (!newConnection.source || !newConnection.target || newConnection.source === newConnection.target) return;
-      removeEdge(oldEdge.id);
-      addCustomEdge(
+      reconnectEdge(
+        oldEdge.id,
         newConnection.source.replace('action-', ''),
         newConnection.target.replace('action-', ''),
         newConnection.sourceHandle ?? undefined,
         newConnection.targetHandle ?? undefined,
       );
     },
-    [removeEdge, addCustomEdge]
+    [reconnectEdge]
   );
 
   const onInit = useCallback((instance: ReactFlowInstance) => {
@@ -253,13 +263,14 @@ export function BlueprintCanvas() {
     setSelectedEdge(null);
     setSelectedColumnKey(null);
     setSelectedLaneSegment(null);
+    setSelectedLaneId(null);
     setSelectedPhase(null);
     clearOverviewCell();
-  }, [canvasView, setCanvasView, setSelectedNode, setSelectedEdge, setSelectedColumnKey, setSelectedLaneSegment, setSelectedPhase, clearOverviewCell]);
+  }, [canvasView, setCanvasView, setSelectedNode, setSelectedEdge, setSelectedColumnKey, setSelectedLaneSegment, setSelectedLaneId, setSelectedPhase, clearOverviewCell]);
 
   const displayNodes = useMemo(() => {
-    const EDITING = ['emptyCell', 'columnInserter', 'columnOverlay', 'phaseBoundary', 'phaseAdder', 'actorAdder'];
-    const base = (presentMode || overviewMode || isGuestView) ? nodes.filter((n) => !EDITING.includes(n.type ?? '')) : nodes;
+    const EDITING = ['emptyCell', 'columnInserter', 'columnOverlay', 'phaseBoundary', 'phaseAdder', 'actorAdder', 'timelineAdder', 'statusAdder'];
+    const base = (presentMode || overviewMode || isGuestView || commentMode || isCollaboratorView) ? nodes.filter((n) => !EDITING.includes(n.type ?? '')) : nodes;
 
     if (!actorDragOffset && !phaseDragOffset && !draggingNodeId) return base;
 
@@ -303,7 +314,7 @@ export function BlueprintCanvas() {
           : n.style,
       };
     });
-  }, [nodes, presentMode, overviewMode, isGuestView, actorDragOffset, phaseDragOffset, draggingNodeId]);
+  }, [nodes, presentMode, overviewMode, isGuestView, commentMode, isCollaboratorView, actorDragOffset, phaseDragOffset, draggingNodeId]);
 
   const handleMultiDelete = useCallback(() => {
     selectedActionNodes.forEach((n) => removeAction(n.id.replace('action-', '')));
@@ -318,6 +329,7 @@ export function BlueprintCanvas() {
         nodes={displayNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
@@ -331,15 +343,15 @@ export function BlueprintCanvas() {
         connectionMode={ConnectionMode.Loose}
         connectionLineStyle={{ stroke: 'var(--accent-primary)', strokeWidth: 1.5 }}
         connectionLineType={ConnectionLineType.SmoothStep}
-        edgesReconnectable={!presentMode && !isGuestView}
-        nodesDraggable={!presentMode && !overviewMode && !isGuestView}
-        nodesConnectable={!presentMode && !isGuestView}
+        edgesReconnectable={!presentMode && !isGuestView && !commentMode && !isCollaboratorView}
+        nodesDraggable={!presentMode && !overviewMode && !isGuestView && !commentMode && !isCollaboratorView}
+        nodesConnectable={!presentMode && !isGuestView && !commentMode && !isCollaboratorView}
         nodeDragThreshold={1}
         colorMode={theme === 'dark' ? 'dark' : 'light'}
         minZoom={0.2}
         maxZoom={2}
         panOnScroll
-        selectionOnDrag={!presentMode && !isGuestView}
+        selectionOnDrag={!presentMode && !isGuestView && !commentMode && !isCollaboratorView}
         panOnDrag={[1, 2]}
         zoomOnDoubleClick={false}
         disableKeyboardA11y={true}

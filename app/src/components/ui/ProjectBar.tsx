@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Plus, FileText, Trash2, LogOut, Share2, Link, Copy, Check, X } from 'lucide-react';
+import { ChevronDown, Plus, FileText, Trash2, LogOut, Share2, Link, Copy, Check, X, Eye } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { deleteBlueprint, loadAllBlueprints, getShareToken, createShareToken, deleteShareToken, saveBlueprintCloud } from '../../lib/storage';
 import { clearBlueprint } from '../../lib/storage';
 import type { Blueprint } from '../../types/blueprint';
+import { CollaboratorsPanel } from './CollaboratorsPanel';
+import { NotificationsBell } from './NotificationsBell';
 
 export function ProjectBar() {
   const blueprint = useBlueprintStore((s) => s.blueprint);
@@ -12,6 +14,10 @@ export function ProjectBar() {
   const switchToBlueprint = useBlueprintStore((s) => s.switchToBlueprint);
   const renameBlueprint = useBlueprintStore((s) => s.renameBlueprint);
   const signOut = useBlueprintStore((s) => s.signOut);
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const isGuestView = useBlueprintStore((s) => s.isGuestView);
+  const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
+  const editLocked = commentMode || isGuestView || isCollaboratorView;
 
   const [open, setOpen] = useState(false);
   const [allBlueprints, setAllBlueprints] = useState<Record<string, Blueprint>>({});
@@ -32,6 +38,7 @@ export function ProjectBar() {
   }
 
   function handleNew() {
+    if (editLocked) return;
     clearBlueprint();
     setMode('onboarding');
     setOpen(false);
@@ -44,17 +51,20 @@ export function ProjectBar() {
 
   function handleDelete(e: React.MouseEvent, id: string) {
     e.stopPropagation();
+    if (editLocked) return;
     deleteBlueprint(id);
     setAllBlueprints(loadAllBlueprints());
     if (blueprint?.id === id) handleNew();
   }
 
   function startEditTitle() {
+    if (editLocked) return;
     setTitleDraft(blueprint?.name ?? '');
     setEditingTitle(true);
   }
 
   function commitTitle() {
+    if (editLocked) { setEditingTitle(false); return; }
     renameBlueprint(titleDraft);
     setEditingTitle(false);
   }
@@ -163,7 +173,7 @@ export function ProjectBar() {
         ) : (
           <button
             onClick={startEditTitle}
-            title="Click to rename blueprint"
+            title={editLocked ? blueprint?.name : 'Click to rename blueprint'}
             style={{
               flex: 1,
               padding: '8px 12px',
@@ -172,7 +182,7 @@ export function ProjectBar() {
               color: 'var(--text-primary)',
               background: 'transparent',
               border: 'none',
-              cursor: 'text',
+              cursor: editLocked ? 'default' : 'text',
               textAlign: 'left',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -309,6 +319,35 @@ export function ProjectBar() {
         </div>
       )}
     </div>
+
+      {/* Collaborator read-only indicator */}
+      {isCollaboratorView && (
+        <div
+          title="You're viewing this blueprint as a collaborator. You can comment but not edit."
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '6px 10px',
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'var(--accent-primary)',
+            background: 'var(--accent-primary-soft)',
+            border: '1px solid var(--accent-primary-soft)',
+            borderRadius: 'var(--radius-pill)',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <Eye size={11} />
+          Viewing as collaborator
+        </div>
+      )}
+
+      {/* Notifications bell */}
+      <NotificationsBell />
+
+      {/* Collaborators panel — owner only */}
+      <CollaboratorsPanel />
 
       {/* Share button + dropdown */}
       {userEmail && (

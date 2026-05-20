@@ -18,6 +18,10 @@ export function PhaseInspector() {
   const updatePhase = useBlueprintStore((s) => s.updatePhase);
   const removePhase = useBlueprintStore((s) => s.removePhase);
   const rfNodes = useBlueprintStore((s) => s.rfNodes);
+  const commentMode = useBlueprintStore((s) => s.commentMode);
+  const isGuestView = useBlueprintStore((s) => s.isGuestView);
+  const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
+  const editLocked = commentMode || isGuestView || isCollaboratorView;
 
   const [activeTab, setActiveTab] = useState<Tab>('details');
   const [nameDraft, setNameDraft] = useState('');
@@ -167,10 +171,11 @@ Write a concise 1-2 sentence description of what this phase of the service journ
             <FieldBlock label="Phase name">
               <input
                 value={nameDraft}
-                onChange={(e) => setNameDraft(e.target.value)}
-                onBlur={() => { const v = nameDraft.trim(); if (v && v !== phase.name) updatePhase(phase.id, { name: v }); }}
+                onChange={(e) => !editLocked && setNameDraft(e.target.value)}
+                onBlur={() => { if (editLocked) return; const v = nameDraft.trim(); if (v && v !== phase.name) updatePhase(phase.id, { name: v }); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                style={inputStyle}
+                readOnly={editLocked}
+                style={{ ...inputStyle, cursor: editLocked ? 'default' : undefined }}
               />
             </FieldBlock>
 
@@ -178,16 +183,18 @@ Write a concise 1-2 sentence description of what this phase of the service journ
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <textarea
                   value={descDraft}
-                  onChange={(e) => setDescDraft(e.target.value)}
+                  onChange={(e) => !editLocked && setDescDraft(e.target.value)}
                   onBlur={() => {
+                    if (editLocked) return;
                     const v = descDraft.trim();
                     if (v !== (phase.description ?? '')) updatePhase(phase.id, { description: v || undefined });
                   }}
                   placeholder="Describe what happens in this phase…"
                   rows={4}
-                  style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 }}
+                  readOnly={editLocked}
+                  style={{ ...inputStyle, resize: editLocked ? 'none' : 'vertical', lineHeight: 1.6, cursor: editLocked ? 'default' : undefined }}
                 />
-                <button
+                {!editLocked && <button
                   onClick={generateDescription}
                   disabled={generating}
                   style={{
@@ -208,14 +215,15 @@ Write a concise 1-2 sentence description of what this phase of the service journ
                 >
                   <Sparkles size={12} />
                   {generating ? 'Generating…' : 'Generate with AI'}
-                </button>
+                </button>}
               </div>
             </FieldBlock>
 
             {/* Conditional phase toggle */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button
-                onClick={() => updatePhase(phase.id, { conditional: !phase.conditional, conditionLabel: phase.conditional ? undefined : conditionDraft || undefined })}
+                onClick={() => { if (editLocked) return; updatePhase(phase.id, { conditional: !phase.conditional, conditionLabel: phase.conditional ? undefined : conditionDraft || undefined }); }}
+                disabled={editLocked}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -261,9 +269,10 @@ Write a concise 1-2 sentence description of what this phase of the service journ
               {phase.conditional && (
                 <input
                   value={conditionDraft}
-                  onChange={(e) => setConditionDraft(e.target.value)}
-                  onBlur={() => updatePhase(phase.id, { conditionLabel: conditionDraft.trim() || undefined })}
+                  onChange={(e) => !editLocked && setConditionDraft(e.target.value)}
+                  onBlur={() => { if (editLocked) return; updatePhase(phase.id, { conditionLabel: conditionDraft.trim() || undefined }); }}
                   onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  readOnly={editLocked}
                   placeholder="e.g. if document failed verification…"
                   style={{ ...inputStyle, fontSize: 12 }}
                 />
@@ -447,8 +456,8 @@ Write a concise 1-2 sentence description of what this phase of the service journ
 
       </div>
 
-      {/* Delete phase button — only on Details tab */}
-      {activeTab === 'details' && (
+      {/* Delete phase button — only on Details tab and when not edit-locked */}
+      {activeTab === 'details' && !editLocked && (
         <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border-subtle)', flexShrink: 0 }}>
           <button
             onClick={() => setConfirmDeletePhase(true)}
