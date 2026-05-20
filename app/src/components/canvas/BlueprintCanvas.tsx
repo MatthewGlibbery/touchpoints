@@ -33,7 +33,6 @@ export function BlueprintCanvas() {
   const setDragOverInserterId = useBlueprintStore((s) => s.setDragOverInserterId);
   const insertSubstep = useBlueprintStore((s) => s.insertSubstep);
   const addCustomEdge = useBlueprintStore((s) => s.addCustomEdge);
-  const removeEdge = useBlueprintStore((s) => s.removeEdge);
   const reconnectEdge = useBlueprintStore((s) => s.reconnectEdge);
   const theme = useBlueprintStore((s) => s.theme);
   const presentMode = useBlueprintStore((s) => s.presentMode);
