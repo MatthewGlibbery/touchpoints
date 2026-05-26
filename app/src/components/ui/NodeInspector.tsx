@@ -207,7 +207,7 @@ export function NodeInspector() {
 
             {/* Media */}
             <FieldBlock label="Media">
-              <MediaSection action={action} blueprintId={blueprint.id} onUpdate={(media) => updateAction(action.id, { media })} onLightbox={setLightboxUrl} />
+              <MediaSection action={action} blueprintId={blueprint!.id} onUpdate={(media) => updateAction(action.id, { media })} onLightbox={setLightboxUrl} />
             </FieldBlock>
           </>
         )}
