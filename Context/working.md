@@ -2,87 +2,31 @@
 
 ## Current Objective
 
-**Session AN: Edge ordering + AI badges + UI restructure** — four workstreams covering connector polish, AI-generated indicator badges, navigation/menu rearrangement, and user avatar/profile area.
+**Session AN: Edge ordering + AI badges + UI restructure + media upload — DONE (2026-05-25)** — four workstreams covering connector polish, AI-generated indicator badges, navigation/menu rearrangement, image upload, and user avatar/profile area.
 
-### Plan
+### Done in Session AN (2026-05-25)
 
-#### AN.1 — Edge ordering at shared handles (connector cleanliness)
-**Problem:** When two connectors leave the same handle (e.g. one goes straight right, one goes up-then-right), they can cross visually because the ordering is arbitrary.
+- **Media upload** — Drag-and-drop image/GIF/video upload to action cards. New `app/src/lib/upload.ts` uploads to `action-media` Supabase Storage bucket (client-side, JWT-authenticated). `NodeInspector` MediaSection rewritten: drop zone + file picker + URL paste (single image per action, preview with delete button). `ActionNode` accepts file drops directly on the card. Migration: `supabase/migrations/20260525_action_media_bucket.sql`.
+- **NodeInspector version fix** — Inspector now reads from `getBlueprintForVersion(blueprint, activeVersionId)` instead of raw `blueprint.actions`, fixing the bug where media preview didn't show when a named version was active.
+- **Custom edge path builder** — Replaced ReactFlow's `getSmoothStepPath` with a custom builder in `CommentedSmoothStepEdge.tsx`. Max 2 turns; straight lines for same-row/same-column edges; L-shape for mixed-direction; Z-shape for cross-row. Corner radius 8px.
+- **Directional handle offsets** — Every edge gets a perpendicular offset based on direction (computed from actual handle center positions). Right/Left: up → above center, straight → center, down → below center. Top/Bottom: left → left of center, straight → center, right → right of center. Multiple edges on same handle get additional 6px spread.
+- **ACTION_NODE_HEIGHT reduced** — From 140px to 64px. Cards now size to their actual content; "New step" cards are properly vertically centered in their row.
+- **AI sparkle badges** — When all pains/opps/questions on a card are `aiGenerated: true`, a ✨ Sparkles icon appears in the badge pill. Layout passes `allPainsAi`/`allOppsAi`/`allQsAi` flags in node data.
+- **ViewRail** — New `app/src/components/ui/ViewRail.tsx` replaces the old top-right ViewBar dropdown. Fixed left side, vertically centered. Icons-only when collapsed (on mouse-leave); labels + divider appear on hover. Active item highlighted with accent color. Includes Edit/Pains/Opportunities/Questions + divider + Present + Comment.
+- **UserMenu** — New `app/src/components/ui/UserMenu.tsx`. Avatar circle (initials, accent-primary border on white bg) fixed top-right. Click → dropdown with name/email + sign out. Hosts `CollaboratorsPanel` pill and `NotificationsBell` alongside.
+- **Share link moved** — Removed standalone Share button from ProjectBar. Share link generation/copy/revoke now lives inside the CollaboratorsPanel ("People") dropdown as a `ShareLinkSection` below the collaborator list.
+- **ProjectBar simplified** — Now just the title pill + project switcher + "Viewing as collaborator" badge. Positioned at `left: 60px` to clear the ViewRail.
+- **Dropdown positioning** — CollaboratorsPanel and NotificationsBell dropdowns changed from `left: 0` to `right: 0` so they don't go off-screen when mounted in the top-right.
 
-**Fix:** In the handle-offset computation in `layout.ts`, sort edges at each shared handle so that edges going "up" (negative Y delta) are assigned a negative offset (placed above center) and edges going "down" or straight are assigned a positive offset (placed below center). This ensures the upward edge is physically above the straight/downward edge, preventing crossings.
-
-**Implementation:**
-- In the `handleGroups` post-processing pass, when assigning offsets, sort by the edge's target Y relative to source Y (ascending — most-negative-dy first → gets the most-negative offset → visually on top).
-- For target handles, sort by source Y relative to target Y.
-- Keep the "straight edge stays centered" priority — if one edge is perfectly straight (dy ≈ 0), it gets offset 0 regardless.
-
-**Scope:** ~20 lines in `layout.ts` edge-offset section.
-
-#### AN.2 — AI-generated badges on action cards
-**Problem:** AI-generated pains/opps/questions exist in the data but the card badges don't indicate which are AI-generated vs user-created.
-
-**Fix:** Add a small sparkle indicator (✨ or `Sparkles` icon) on the badge pill when ALL items of that type on the action are `aiGenerated: true`. If it's a mix, show a half-sparkle or just the count (no indicator). This gives a quick visual signal without cluttering.
-
-**Implementation:**
-- `ActionNode.tsx`: for each badge type (pain/opp/question), check if every linked item has `aiGenerated: true`. If yes, render a tiny `Sparkles` icon (size 8) next to the count.
-- Need to read `blueprint.painPoints` / `opportunities` / `questions` from the store to check the flag. Currently ActionNode only has the IDs — need to pass the items or a flag in node data.
-- Simplest: pass `aiPainCount`, `aiOppCount`, `aiQuestionCount` in the node data from layout.ts (avoids store reads in the hot render path).
-
-**Scope:** ~15 lines in `layout.ts` (data enrichment), ~20 lines in `ActionNode.tsx` (conditional sparkle render).
-
-#### AN.3 — ViewBar → left-side vertical icon rail
-**Problem:** The edit/pains/opps/questions menu is a dropdown pill in the top-right. User wants it as a vertical icon rail on the left side, icons-only until hover reveals labels, with the active item highlighted.
-
-**Current:** `ViewBar.tsx` — fixed top-right pill with dropdown.
-
-**Target:** New `ViewRail.tsx` — fixed left side, vertically centered, column of icon buttons. Each button:
-- Shows only the icon (Pencil / AlertCircle / Lightbulb / HelpCircle) at rest
-- On hover: expands to show the label text (tooltip or inline expand)
-- Active item: highlighted background + accent color
-- Also includes Present and Comment mode toggles at the bottom of the rail (separated by a divider)
-
-**Implementation:**
-- Create `app/src/components/ui/ViewRail.tsx`
-- Replace `<ViewBar />` with `<ViewRail />` in `App.tsx`
-- Remove or keep `ViewBar.tsx` (can delete since it's fully replaced)
-- Position: `fixed, left: 16, top: 50%, transform: translateY(-50%)`, z-index 50
-- Style: vertical pill container matching existing design system (surface-bg, border-subtle, shadow-sm, radius-pill)
-
-**Scope:** New component (~80 lines), App.tsx import swap, ViewBar.tsx deletion.
-
-#### AN.4 — User avatar + profile area (top-right)
-**Problem:** Top-right currently has ViewBar (being moved). User wants an avatar circle with initials, clicking opens profile/notifications, with a way to access collaborators + share.
-
-**Target:** New `UserMenu.tsx` — fixed top-right:
-- Circle with user initials (derived from `displayName` or `userEmail`), colored background
-- Click → dropdown with:
-  - User name + email
-  - Notifications section (inline list or link to bell)
-  - Divider
-  - "People" row (Users icon) → opens CollaboratorsPanel
-  - "Share link" row (Link icon) → opens share panel
-  - Divider
-  - Sign out
-
-**Implementation:**
-- Create `app/src/components/ui/UserMenu.tsx`
-- Move `NotificationsBell` logic into the dropdown (or keep bell as a separate icon next to the avatar)
-- Move `CollaboratorsPanel` trigger into the dropdown
-- Move Share link trigger into the dropdown
-- Remove these from `ProjectBar` (ProjectBar becomes just the title pill + project switcher)
-- Mount `<UserMenu />` in `App.tsx` where `<ViewBar />` used to be (top-right)
-
-**Scope:** New component (~120 lines), ProjectBar simplification, App.tsx wiring.
-
-### Execution order
-1. **AN.1** — ✅ Done. Edge offsets sorted by direction per handle side.
-2. **AN.2** — ✅ Done. Sparkle badges on AI-generated items.
-3. **AN.3** — ✅ Done. ViewRail on left side replaces ViewBar dropdown.
-4. **AN.4** — ✅ Done. UserMenu avatar top-right with collaborators, notifications, sign out.
-
-### Out of scope
-- Real-time presence (showing other users' cursors) — the avatar circle prepares for this but actual multiplayer is a separate feature
-- Rearranging connector order manually (deferred — AN.1's automatic sorting should handle most cases; if it doesn't we revisit)
+### Verification
+- [x] Build passes (`npx tsc --noEmit` + `npx vite build`)
+- [x] Pushed to GitHub (commit `1151d0f`)
+- [ ] Manual: drop image on card → uploads, shows on card + in inspector preview
+- [ ] Manual: connectors between same-row cards are straight (no kinks)
+- [ ] Manual: vertical connectors leave from bottom-center
+- [ ] Manual: ViewRail collapses to icons, expands on hover
+- [ ] Manual: People dropdown shows collaborators + share link section
+- [ ] Manual: Avatar circle top-right, click → sign out works
 
 ---
 

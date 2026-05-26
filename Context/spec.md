@@ -177,7 +177,7 @@ PHASE_WIDTH             = 280px
 ACTOR_LABEL_WIDTH       = 160px
 PHASE_HEADER_HEIGHT     = 72px
 ACTION_NODE_WIDTH       = 220px
-ACTION_NODE_HEIGHT      = 140px   ← minimum card height (text-only baseline)
+ACTION_NODE_HEIGHT      = 64px    ← minimum card height (icon + label + padding)
 ACTION_NODE_HEIGHT_MEDIA= 240px   ← kept for reference; actual height now estimated
 ROW_HEIGHT              = 200px   ← minimum row height bound
 ROW_HEIGHT_MEDIA        = 300px   ← kept for reference; actual row height now dynamic
@@ -312,6 +312,15 @@ The ReactFlow instance is stored in `rfInstanceRef` (local ref) for use by the v
 - **Removed edges** (`removedEdgeIds[]`): auto-generated edges the user deleted; filtered out in `blueprintToFlow`
 - Edge meta (`edgeMeta` keyed by edge ID): `flowType` ('sequence' / 'dependency' / 'decision') + optional `label` + optional `labelOffset` (0..1, position along path; default 0.5 = midpoint); dependency = purple, decision = amber dashed
 - `ConnectionMode.Loose` and `edgesReconnectable` enabled
+- **Custom path builder** (`CommentedSmoothStepEdge`): replaces ReactFlow's `getSmoothStepPath`. Produces clean paths with at most 2 turns:
+  - Straight line when source/target handles are aligned (same Y for horizontal, same X for vertical)
+  - Z-shape (2 rounded turns) when routing across different rows/columns
+  - L-shape (1 turn) for mixed-direction edges (horizontal source → vertical target or vice versa)
+  - Corner radius: 8px
+- **Directional handle offsets**: every edge gets a perpendicular offset at its source and target based on direction, even for single edges. Computed from actual handle center positions (not node positions):
+  - Right/Left handles: straight (dy≈0) → center, up → 6px above center, down → 6px below center
+  - Top/Bottom handles: straight (dx≈0) → center, left → 6px left of center, right → 6px right of center
+  - When multiple edges share a handle, an additional 6px gap spreads them apart (sorted by direction)
 - **Selected-edge UX**: clicking an edge sets ReactFlow's `selected` state (and opens `EdgeInspector`). When selected, `CommentedSmoothStepEdge` renders visible `<circle>` markers at the source/target endpoints (`pointer-events: none` so they don't block drags). Underneath sit ReactFlow's `EdgeAnchor` reconnect zones — drag from the endpoint to a different action's handle to rewire.
 - **Reconnection preserves meta**: `BlueprintCanvas.onReconnect` calls a single atomic store action `reconnectEdge(oldId, src, tgt, srcHandle?, tgtHandle?)` which removes the old edge (filter from `customEdges` if custom, else add to `removedEdgeIds`), creates the new custom edge with a fresh id, and copies `edgeMeta[oldId] → edgeMeta[newId]`. Result: rewired edges keep their label, `flowType` color, and `labelOffset`.
 - **Draggable label**: when an edge has a label, the label container is `cursor: grab`. Mousedown → window-level mousemove projects the cursor (in flow coords via `screenToFlowPosition`) onto a hidden measurement `<path>` element via a coarse-then-fine `getPointAtLength` scan → live preview updates the rendered position → mouseup commits the new fraction via `updateEdgeMeta(id, { labelOffset })`. Disabled in present / guest / comment / collaborator modes.
@@ -509,12 +518,13 @@ Bootstraps from LocalStorage on module import.
 
 | Zone | Component | Contents |
 |---|---|---|
-| Top-left | ProjectBar | Blueprint name (editable inline, click to edit); project switcher chevron |
-| Top-left (below ProjectBar) | VersionBar | "Current" (editable, double-click) + named version pills, fork (+), delete (×), Compare button; positioned `top: 56, left: 16` |
-| Top-centre | ModeBar | Blueprints (Map icon) / Personas (Users icon, stub) / Journey Maps (Film icon → storyboardMode); no Present tab — Present is accessed via ViewBar dropdown |
-| Top-right | ViewBar | Dropdown (pill + chevron, styled like ProjectBar): Edit / Pains / Opportunities / Questions + divider + Present; label shows 'Presenting' when in presentation context |
-| Top-left (right of ProjectBar) | NotificationsBell | Bell icon + unread count badge; dropdown lists mentions/replies/reactions; click row → load blueprint + open thread |
-| Top-left (in ProjectBar dropdown) | CollaboratorsPanel | Owner-only "People" section; invite-by-email + collaborator list with pending/accepted state |
+| Top-left (`left: 60`) | ProjectBar | Blueprint name (editable inline, click to edit); project switcher chevron; "Viewing as collaborator" pill |
+| Top-left (below ProjectBar) | VersionBar | "Current" (editable, double-click) + named version pills, fork (+), delete (×), Compare button; positioned `top: 56, left: 60` |
+| Top-centre | ModeBar | Blueprints (Map icon) / Personas (Users icon, stub) / Journey Maps (Film icon → storyboardMode) |
+| Left (vertically centred) | ViewRail | Collapsible icon rail: Edit / Pains / Opportunities / Questions + divider + Present + Comment. Icons-only when collapsed; labels appear on hover. Active item highlighted with accent color. Replaces the old top-right ViewBar dropdown. |
+| Top-right | UserMenu | Avatar circle (initials, accent-primary border); click → dropdown with name/email + sign out. Alongside: NotificationsBell + CollaboratorsPanel pill |
+| Top-right (in People dropdown) | CollaboratorsPanel | Owner-only "People" pill; invite-by-email + collaborator list + share link section (generate/copy/revoke) |
+| Top-right (next to avatar) | NotificationsBell | Bell icon + unread count badge; dropdown lists mentions/replies/reactions; click row → load blueprint + open thread |
 | Top-centre (canvas) | CommentFilterBar | Visible only in `commentMode`; filter pills All · @Me · Unresolved · Resolved · Detached |
 | Anywhere (anchored to clicked element) | CommentThread | Composer + flat reply list + reaction row + resolve toggle; opened by click in comment mode OR by clicking a `CommentBadge` in any mode |
 | Left | NodeInspector | Opens on action click (normal mode); slides in from left; `App.tsx` renders `<OverviewInspector />` instead when `overviewMode && selectedOverviewCell` |
@@ -584,7 +594,7 @@ When `commentMode` is true (mutually exclusive with `presentMode` / `presentatio
 - Click on a hovered element opens `CommentThread` popover anchored via screen-coord conversion (same approach as `SelectionToolbar`). Edge clicks route to the comment composer instead of `EdgeInspector`.
 - All inline edits in NodeInspector / ActorPanel / EdgeInspector / PhaseInspector / VersionBar / ProjectBar are gated on `commentMode || isGuestView`. Lane label drag/select/recolor/delete is also gated. Undo/redo keyboard shortcuts blocked.
 - A floating top-of-canvas pill bar (`CommentFilterBar`) shows filter pills: **All · @Me · Unresolved · Resolved · Detached**. State stored as `commentFilter` in the comments slice. Non-matching anchors hide their `CommentBadge`.
-- Activated from a comment-bubble button in `ViewBar` (or as a new ViewBar dropdown option).
+- Activated from the Comment button in `ViewRail` (left-side icon rail).
 
 ### CommentThread popover (`app/src/components/ui/CommentThread.tsx`)
 Floating popover anchored to the clicked element. Two modes:
@@ -605,10 +615,10 @@ Click on a badge → `openCommentThread(anchor)` regardless of current mode. Thr
 A new tab in `NodeInspector` between Questions and the existing tab set. Reads the same `comments` slice filtered by `anchor: { type: 'action', id: actionId }`. Renders the same composer + thread + reactions + resolve UI as the popover. Available in normal edit mode (read-only when not a collaborator); writes are gated.
 
 ### NotificationsBell (`app/src/components/ui/NotificationsBell.tsx`)
-Bell icon with unread count badge mounted in `ProjectBar` next to the Share button. Dropdown lists recent rows from the `notifications` table (mentions, replies, reactions). Click a row → loads the linked blueprint and opens the linked comment thread (same deep-link path as email). "Mark all read" button.
+Bell icon with unread count badge mounted in `UserMenu` (top-right). Dropdown (right-aligned) lists recent rows from the `notifications` table (mentions, replies, reactions). Click a row → loads the linked blueprint and opens the linked comment thread (same deep-link path as email). "Mark all read" button.
 
 ### CollaboratorsPanel (`app/src/components/ui/CollaboratorsPanel.tsx`)
-Owner-only panel mounted from a "People" button in `ProjectBar`. Lists current collaborators + pending invites (status pill). Owner can invite by email (calls `invite-collaborator` edge function), remove a collaborator. Invitees who sign in via OTP are reconciled by a DB trigger on `auth.users` insert/update (matching email → set `user_id` + `accepted_at`).
+Owner-only "People" pill mounted in `UserMenu` (top-right). Dropdown contains: invite-by-email form + collaborator list (active/pending) + share link section (generate/copy/revoke). Invitees who sign in via OTP are reconciled by a DB trigger on `auth.users` insert/update (matching email → set `user_id` + `accepted_at`).
 
 ### DetachedThreadsModal
 Lists threads whose anchor element no longer exists in the blueprint's structural data. Comments are NEVER cascade-deleted on element removal — they surface here. Per-thread "Re-attach to…" picker lets the user select a new anchor; permanent-delete option also available. Detected via a `getDetachedThreads(blueprintId)` selector that filters anchors against current structural state.
@@ -795,8 +805,10 @@ app/src/
 │       ├── CommentThread.tsx       ← composer + flat reply list + reaction row + resolve toggle; popover anchored to a structural element
 │       ├── CommentBadge.tsx        ← always-visible count indicator; mounted on every commentable anchor
 │       ├── MentionInput.tsx        ← textarea + @-mention autocomplete (collaborators only)
-│       ├── CollaboratorsPanel.tsx  ← owner-only invite/list/remove; mounted from ProjectBar
-│       ├── NotificationsBell.tsx   ← bell icon + unread badge + dropdown; mounted in ProjectBar
+│       ├── CollaboratorsPanel.tsx  ← owner-only invite/list/remove/share-link; mounted in UserMenu
+│       ├── NotificationsBell.tsx   ← bell icon + unread badge + dropdown; mounted in UserMenu
+│       ├── UserMenu.tsx            ← top-right avatar circle + sign-out dropdown; hosts CollaboratorsPanel + NotificationsBell
+│       ├── ViewRail.tsx            ← left-side collapsible icon rail (Edit/Pains/Opps/Questions/Present/Comment)
 │       ├── CommentFilterBar.tsx    ← top-of-canvas filter pills (All · @Me · Unresolved · Resolved · Detached); only in commentMode
 │       ├── DetachedThreadsModal.tsx ← lists threads whose anchor was deleted; per-thread re-attach or permanent-delete
 │       ├── primitives.tsx
@@ -875,7 +887,7 @@ app/src/
 | ← / → in PresentationControls | Navigates to prev/next slide; calls `applyKeyframeState` + `animateToViewport`; compare→normal waits 350ms for canvas remount |
 | "Exit" in PresentationControls | Returns to `presentationEditMode` (slide editor) |
 | Any delete action (step/actor/version/presentation/slide) | Shows `ConfirmDeleteModal` before executing |
-| Toggle comment mode (ViewBar) | Sets `commentMode: true`; cursor → comment bubble; canvas becomes fully read-only; hover highlights every structural anchor |
+| Toggle comment mode (ViewRail) | Sets `commentMode: true`; cursor → comment bubble; canvas becomes fully read-only; hover highlights every structural anchor |
 | Click any structural element in comment mode | Opens `CommentThread` composer anchored to that element (action / phase / actor / edge / status lane / status segment / timeline lane / timeline segment) |
 | Click `CommentBadge` (any mode) | Opens `CommentThread` for that anchor; thread is read-only for non-collaborators |
 | Type `@` in composer / reply | `MentionInput` autocomplete shows collaborators on this blueprint; selection inserts `@[name](userId)` token |
@@ -887,7 +899,7 @@ app/src/
 | Invitee signs in via OTP | DB trigger reconciles the matching `blueprint_collaborators` row with `user_id` + `accepted_at`; blueprint appears in their Projects dropdown |
 | Delete a structural element with comments | Comments are NOT cascade-deleted; surfaced in `DetachedThreadsModal` ("Detached (n)" pill in `CommentFilterBar`); owner can re-attach or permanently delete |
 
-| Click "Share" in ProjectBar | Opens share dropdown; loads existing token from Supabase; shows generate/copy/revoke controls |
+| Click "Share" in People menu | Opens share link section within CollaboratorsPanel; loads existing token from Supabase; shows generate/copy/revoke controls |
 | Click "Generate share link" | Creates `blueprint_shares` row; displays shareable URL |
 | Click "Copy link" | Copies `${origin}?share=<token>` to clipboard; brief "Copied!" confirmation |
 | Click "×" in share dropdown | Revokes link by deleting `blueprint_shares` row |
@@ -968,6 +980,20 @@ Template at `app/.env.example` (committed, no values).
 
 ### Share link token generation
 `blueprint_shares.token` is generated **client-side** in `storage.ts` (`generateToken()` — `crypto.getRandomValues` → URL-safe base64) and passed explicitly on insert. The DB column has no default. The Supabase PostgreSQL version does not support `encode(..., 'base64url')`.
+
+### Supabase Storage buckets
+| Bucket | Public | Purpose |
+|---|---|---|
+| `storyboard-images` | yes | DALL-E generated journey map frames (uploaded by `ai-storyboard` edge function via service role) |
+| `action-media` | yes | User-uploaded images/GIFs/videos attached to action cards (uploaded client-side via `app/src/lib/upload.ts`) |
+
+**`action-media` RLS**: authenticated users can upload/update/delete within their own folder (`{userId}/...`). Public read for all. Path format: `{userId}/{blueprintId}/{actionId}/{timestamp}-{filename}`.
+
+### Media upload (`app/src/lib/upload.ts`)
+Client-side upload directly to the `action-media` Supabase Storage bucket. Max 10 MB. Accepts image/* and video/* MIME types. Returns a public URL on success. Used by:
+- `NodeInspector` MediaSection: drag-and-drop zone + file picker + URL paste
+- `ActionNode`: drop files directly onto a card on the canvas
+- Single image per action (new upload replaces existing)
 
 ### Hosting
 - **Platform**: Vercel (static SPA deploy)
