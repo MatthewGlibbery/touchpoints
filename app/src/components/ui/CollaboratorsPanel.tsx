@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Users, Mail, Clock, Check, Trash2 } from 'lucide-react';
+import { Users, Mail, Clock, Check, Trash2, Link, Copy, X, Share2 } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { useCommentsStore } from '../../store/comments.store';
+import { getShareToken, createShareToken, deleteShareToken, saveBlueprintCloud } from '../../lib/storage';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -121,7 +122,7 @@ export function CollaboratorsPanel() {
           style={{
             position: 'absolute',
             top: 'calc(100% + 6px)',
-            left: 0,
+            right: 0,
             width: 320,
             background: 'var(--surface-bg)',
             border: '1px solid var(--border-subtle)',
@@ -254,18 +255,13 @@ export function CollaboratorsPanel() {
             ))}
 
             {collaborators.length === 0 && (
-              <div
-                style={{
-                  padding: '14px',
-                  fontSize: 12,
-                  color: 'var(--text-muted)',
-                  lineHeight: 1.5,
-                }}
-              >
-                Invite teammates by email so they can comment on this blueprint.
-                They'll get an invite email and access once they sign in.
+              <div style={{ padding: '8px 14px', fontSize: 12, color: 'var(--text-muted)' }}>
+                No collaborators yet
               </div>
             )}
+
+            {/* Share link section */}
+            <ShareLinkSection blueprintId={blueprint.id} />
           </div>
         </div>
       )}
@@ -350,3 +346,122 @@ function CollabRow({
   );
 }
 
+
+function ShareLinkSection({ blueprintId }: { blueprintId: string }) {
+  const [shareToken, setShareToken] = useState<string | null | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const token = await getShareToken(blueprintId);
+      if (!cancelled) setShareToken(token);
+    })();
+    return () => { cancelled = true; };
+  }, [blueprintId]);
+
+  async function handleGenerate() {
+    setLoading(true);
+    setError(null);
+    await saveBlueprintCloud(useBlueprintStore.getState().blueprint!);
+    const token = await createShareToken(blueprintId);
+    if (token) setShareToken(token);
+    else setError('Could not create share link.');
+    setLoading(false);
+  }
+
+  async function handleRevoke() {
+    setLoading(true);
+    await deleteShareToken(blueprintId);
+    setShareToken(null);
+    setLoading(false);
+  }
+
+  function handleCopy() {
+    if (!shareToken) return;
+    const url = `${window.location.origin}${window.location.pathname}?share=${shareToken}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border-subtle)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <Link size={12} color="var(--text-muted)" />
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Share link</span>
+      </div>
+
+      {loading ? (
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading…</span>
+      ) : shareToken ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{
+            padding: '6px 8px',
+            background: 'var(--surface-bg-muted)',
+            borderRadius: 'var(--radius-md)',
+            fontSize: 11, color: 'var(--text-secondary)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {window.location.origin}/?share={shareToken}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={handleCopy}
+              style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                padding: '6px', fontSize: 11, fontWeight: 500,
+                color: copied ? 'var(--accent-success)' : 'var(--accent-primary)',
+                background: copied ? 'var(--accent-success-soft)' : 'var(--accent-primary-soft)',
+                border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+              }}
+            >
+              {copied ? <Check size={11} /> : <Copy size={11} />}
+              {copied ? 'Copied!' : 'Copy link'}
+            </button>
+            <button
+              onClick={handleRevoke}
+              title="Revoke link"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '6px 8px',
+                color: 'var(--text-muted)',
+                background: 'transparent',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)', cursor: 'pointer',
+              }}
+            >
+              <X size={11} />
+            </button>
+          </div>
+        </div>
+      ) : shareToken === undefined ? (
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading…</span>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <p style={{ margin: 0, fontSize: 11, color: 'var(--text-muted)' }}>
+            Anyone with the link can view this blueprint.
+          </p>
+          {error && <p style={{ margin: 0, fontSize: 11, color: 'var(--accent-danger)' }}>{error}</p>}
+          <button
+            onClick={handleGenerate}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              padding: '7px',
+              fontSize: 12, fontWeight: 600,
+              color: 'var(--accent-primary)',
+              background: 'var(--accent-primary-soft)',
+              border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+            }}
+          >
+            <Share2 size={12} />
+            Generate share link
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

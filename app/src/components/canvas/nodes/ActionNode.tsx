@@ -2,15 +2,17 @@ import { memo, useState, useCallback, useRef, useEffect } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import {
   User, Globe, Building2, Users, Activity,
-  AlertCircle, Lightbulb, HelpCircle, Diamond,
+  AlertCircle, Lightbulb, HelpCircle, Diamond, Sparkles,
 } from 'lucide-react';
 import type { Action } from '../../../types/blueprint';
 import { useBlueprintStore } from '../../../store/blueprint.store';
 import { useCommentsStore } from '../../../store/comments.store';
 import { ACTION_NODE_WIDTH, OVERVIEW_CARD_HEIGHT } from '../../../lib/layout';
 import { CommentBadge } from '../../ui/CommentBadge';
+import { uploadActionMedia, mediaTypeFromFile } from '../../../lib/upload';
+import type { ActionMedia } from '../../../types/blueprint';
 
-type ActionNodeData = { action: Action; actorColor: string; actorOrder: number };
+type ActionNodeData = { action: Action; actorColor: string; actorOrder: number; nodeH?: number; allPainsAi?: boolean; allOppsAi?: boolean; allQsAi?: boolean };
 
 const ACTOR_ICONS = [User, Globe, Building2, Users];
 
@@ -33,7 +35,7 @@ const HIGHLIGHT_GLOW: Record<string, string> = {
 };
 
 export const ActionNode = memo(({ data }: NodeProps) => {
-  const { action, actorColor, actorOrder } = data as ActionNodeData;
+  const { action, actorColor, actorOrder, nodeH, allPainsAi, allOppsAi, allQsAi } = data as ActionNodeData;
   const updateAction = useBlueprintStore((s) => s.updateAction);
   const setSelectedNode = useBlueprintStore((s) => s.setSelectedNode);
   const openInspectorToTab = useBlueprintStore((s) => s.openInspectorToTab);
@@ -79,6 +81,47 @@ export const ActionNode = memo(({ data }: NodeProps) => {
     w: ACTION_NODE_WIDTH,
     h: overviewMode ? OVERVIEW_CARD_HEIGHT : 140,
   });
+
+  // Drag-and-drop file upload state
+  const [fileDragOver, setFileDragOver] = useState(false);
+  const blueprint = useBlueprintStore((s) => s.blueprint);
+  const isGuestView = useBlueprintStore((s) => s.isGuestView);
+  const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
+  const editLocked = isGuestView || isCollaboratorView || commentMode || presentMode;
+
+  const handleFileDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFileDragOver(false);
+    if (editLocked || !blueprint) return;
+    const files = e.dataTransfer.files;
+    if (!files.length) return;
+    // Only accept image/video files — take the first valid one (single image per action)
+    const file = Array.from(files).find(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+    if (!file) return;
+    const result = await uploadActionMedia(file, blueprint.id, action.id);
+    if ('error' in result) {
+      console.error('[ActionNode] upload error:', result.error);
+      return;
+    }
+    const newMedia: ActionMedia[] = [{ id: `m-${Date.now()}`, type: mediaTypeFromFile(file), url: result.url }];
+    updateAction(action.id, { media: newMedia });
+  }, [editLocked, blueprint, action.id, updateAction]);
+
+  const handleFileDragOver = useCallback((e: React.DragEvent) => {
+    if (editLocked) return;
+    // Only show drop indicator for files (not ReactFlow node drags)
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      e.stopPropagation();
+      setFileDragOver(true);
+    }
+  }, [editLocked]);
+
+  const handleFileDragLeave = useCallback((e: React.DragEvent) => {
+    e.stopPropagation();
+    setFileDragOver(false);
+  }, []);
 
   useEffect(() => {
     const el = cardRef.current;
@@ -194,17 +237,19 @@ export const ActionNode = memo(({ data }: NodeProps) => {
 
   const firstMedia = action.media?.[0];
 
-  // Anchor each Handle to the card's actual edges/centers, overriding
-  // ReactFlow's default percentage-based placement (which uses the wrapper —
-  // it can be taller than the card when the row was sized to a taller card).
+  // Anchor left/right handles at the node wrapper's vertical center (= row center)
+  // so horizontal edges between cards of different heights are straight lines.
+  // Top/bottom handles anchor to the card's actual edges for vertical edges.
+  const handleMidY = (nodeH ?? cardSize.h) / 2;
+
   const leftHandleStyle: React.CSSProperties = {
     ...handleStyle,
-    top: cardSize.h / 2,
+    top: handleMidY,
     left: 0,
   };
   const rightHandleStyle: React.CSSProperties = {
     ...handleStyle,
-    top: cardSize.h / 2,
+    top: handleMidY,
     left: cardSize.w,
     right: 'auto',
   };
@@ -215,7 +260,7 @@ export const ActionNode = memo(({ data }: NodeProps) => {
   };
   const bottomHandleStyle: React.CSSProperties = {
     ...handleStyle,
-    top: cardSize.h,
+    top: nodeH ?? cardSize.h,
     bottom: 'auto',
     left: cardSize.w / 2,
   };
@@ -352,9 +397,9 @@ export const ActionNode = memo(({ data }: NodeProps) => {
         style={{
           width: ACTION_NODE_WIDTH,
           background: bgColor,
-          border: `${borderWidth}px solid ${borderColor}`,
+          border: `${borderWidth}px solid ${fileDragOver ? 'var(--accent-primary)' : borderColor}`,
           borderRadius: 'var(--radius-lg)',
-          boxShadow: shadow,
+          boxShadow: fileDragOver ? '0 0 0 4px rgba(59,130,246,0.18), var(--shadow-md)' : shadow,
           padding: '14px',
           overflow: 'hidden',
           cursor: presentMode ? 'default' : 'pointer',
@@ -363,6 +408,9 @@ export const ActionNode = memo(({ data }: NodeProps) => {
         }}
         onDoubleClick={(e) => { if (presentMode || overviewMode || commentMode) return; e.stopPropagation(); setEditing(true); }}
         onClick={handleCardClick}
+        onDrop={handleFileDrop}
+        onDragOver={handleFileDragOver}
+        onDragLeave={handleFileDragLeave}
       >
         {/* Comment badge — top-right of card; visible in any mode when commented */}
         <CommentBadge
@@ -489,6 +537,7 @@ export const ActionNode = memo(({ data }: NodeProps) => {
                 >
                   <AlertCircle size={12} color="var(--accent-danger)" />
                   {painCount}
+                  {allPainsAi && <Sparkles size={8} color="var(--accent-danger)" style={{ opacity: 0.7 }} />}
                 </button>
               )}
               {oppCount > 0 && (
@@ -500,6 +549,7 @@ export const ActionNode = memo(({ data }: NodeProps) => {
                 >
                   <Lightbulb size={12} color="var(--accent-success)" />
                   {oppCount}
+                  {allOppsAi && <Sparkles size={8} color="var(--accent-success)" style={{ opacity: 0.7 }} />}
                 </button>
               )}
               {qCount > 0 && (
@@ -511,11 +561,11 @@ export const ActionNode = memo(({ data }: NodeProps) => {
                 >
                   <HelpCircle size={12} color="var(--accent-warning)" />
                   {qCount}
+                  {allQsAi && <Sparkles size={8} color="var(--accent-warning)" style={{ opacity: 0.7 }} />}
                 </button>
               )}
             </div>
-          </>
-        )}
+          </>        )}
 
       </div>
     </>

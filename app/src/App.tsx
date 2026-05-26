@@ -7,7 +7,8 @@ import { SplitCanvas } from './components/canvas/SplitCanvas';
 import { JourneyMapView } from './components/storyboard/StoryboardView';
 import { ProjectBar } from './components/ui/ProjectBar';
 import { ModeBar } from './components/ui/ModeBar';
-import { ViewBar } from './components/ui/ViewBar';
+import { ViewRail, ViewPanel_ } from './components/ui/ViewRail';
+import { UserMenu } from './components/ui/UserMenu';
 import { VersionBar } from './components/ui/VersionBar';
 import { NodeInspector } from './components/ui/NodeInspector';
 import { ActorPanel } from './components/ui/ActorPanel';
@@ -173,14 +174,16 @@ export default function App() {
           {/* ── Standard edit UI — hidden in present and compare modes ── */}
           {!presentMode && !compareMode && (
             <>
-              {/* ModeBar + ViewBar visible to all including guests */}
+              {/* ModeBar (top center) + ViewRail (left side) + UserMenu (top right) */}
               <ModeBar />
-              <ViewBar />
+              <ViewRail />
+              <ViewPanel_ />
 
               {/* Owner-only UI */}
               {!isGuestView && (
                 <>
                   <ProjectBar />
+                  <UserMenu />
                   <VersionBar />
                   {overviewMode && selectedOverviewCell ? <OverviewInspector /> : <NodeInspector />}
                   <ActorPanel />

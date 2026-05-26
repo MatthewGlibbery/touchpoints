@@ -14,7 +14,7 @@ export const PHASE_WIDTH = 280;
 export const ACTOR_LABEL_WIDTH = 160;
 export const PHASE_HEADER_HEIGHT = 72;
 export const ACTION_NODE_WIDTH = 220;
-export const ACTION_NODE_HEIGHT = 140;
+export const ACTION_NODE_HEIGHT = 64;
 export const ACTION_NODE_HEIGHT_MEDIA = 240;
 export const ROW_HEIGHT = 200;
 export const ROW_HEIGHT_MEDIA = 300;
@@ -370,11 +370,19 @@ export function blueprintToFlow(
 
     occupiedCells.add(`${action.actorId}:${action.phaseId}:${action.order}`);
 
+    // Count AI-generated items for badge indicators
+    const actionPains = blueprint.painPoints.filter(p => action.painPointIds.includes(p.id));
+    const actionOpps = blueprint.opportunities.filter(o => action.opportunityIds.includes(o.id));
+    const actionQs = (blueprint.questions ?? []).filter(q => (action.questionIds ?? []).includes(q.id));
+    const allPainsAi = actionPains.length > 0 && actionPains.every(p => p.aiGenerated);
+    const allOppsAi = actionOpps.length > 0 && actionOpps.every(o => o.aiGenerated);
+    const allQsAi = actionQs.length > 0 && actionQs.every(q => q.aiGenerated);
+
     nodes.push({
       id: `action-${action.id}`,
       type: 'action',
       position: { x, y },
-      data: { action, actorColor: actor.color, actorOrder: actor.order },
+      data: { action, actorColor: actor.color, actorOrder: actor.order, nodeH, allPainsAi, allOppsAi, allQsAi },
       draggable: true,
       dragHandle: '.action-drag-handle',
       width: ACTION_NODE_WIDTH,
@@ -603,7 +611,129 @@ export function blueprintToFlow(
   });
 
   const removed = new Set(blueprint.removedEdgeIds ?? []);
-  return { nodes, edges: removed.size > 0 ? edges.filter((e) => !removed.has(e.id)) : edges };
+  const filteredEdges = removed.size > 0 ? edges.filter((e) => !removed.has(e.id)) : edges;
+
+  // ─── Compute handle offsets for edges ───────────────────────────────────────
+  // Every edge gets an offset based on its direction, even if it's the only
+  // edge on that handle. This keeps the visual language consistent:
+  //   Right/Left handles: straight → center, up → above center, down → below center
+  //   Top/Bottom handles: straight → center, left → left of center, right → right of center
+  const HANDLE_OFFSET = 6; // px offset for non-straight edges
+
+  // Build a lookup for node positions AND heights so we can compute actual handle positions
+  const nodePositions = new Map<string, { x: number; y: number }>();
+  const nodeHeights = new Map<string, number>();
+  const nodeWidths = new Map<string, number>();
+  for (const node of nodes) {
+    nodePositions.set(node.id, node.position);
+    nodeHeights.set(node.id, (node.height as number) ?? 64);
+    nodeWidths.set(node.id, (node.width as number) ?? ACTION_NODE_WIDTH);
+  }
+
+  // Compute actual handle center positions (where the edge visually connects)
+  function getHandleCenter(nodeId: string, handle: string): { x: number; y: number } {
+    const pos = nodePositions.get(nodeId) ?? { x: 0, y: 0 };
+    const h = nodeHeights.get(nodeId) ?? 64;
+    const w = nodeWidths.get(nodeId) ?? ACTION_NODE_WIDTH;
+    switch (handle) {
+      case 'right': return { x: pos.x + w, y: pos.y + h / 2 };
+      case 'left':  return { x: pos.x, y: pos.y + h / 2 };
+      case 'bottom': return { x: pos.x + w / 2, y: pos.y + h };
+      case 'top':    return { x: pos.x + w / 2, y: pos.y };
+      default:       return { x: pos.x + w / 2, y: pos.y + h / 2 };
+    }
+  }
+
+  // Helper: compute offset for a single edge endpoint based on handle + direction
+  // dx/dy here are between the actual handle centers, not node positions
+  function computeOffset(handle: string, dx: number, dy: number): number {
+    if (handle === 'right' || handle === 'left') {
+      // Vertical offset based on dy — only if the edge actually goes up/down
+      if (Math.abs(dy) < 2) return 0; // straight → center
+      return dy < 0 ? -HANDLE_OFFSET : HANDLE_OFFSET; // up → above, down → below
+    }
+    // top or bottom: horizontal offset based on dx — only if the edge goes left/right
+    if (Math.abs(dx) < 2) return 0; // straight → center
+    return dx < 0 ? -HANDLE_OFFSET : HANDLE_OFFSET; // left → left, right → right
+  }
+
+  // For each edge, compute directional offsets for both source and target
+  const edgeOffsets = new Map<string, { sourceOffset: number; targetOffset: number }>();
+
+  for (const edge of filteredEdges) {
+    const srcHandle = edge.sourceHandle as string;
+    const tgtHandle = edge.targetHandle as string;
+    // Skip offset computation if either node isn't in the position map (edge references a deleted node)
+    if (!nodePositions.has(edge.source as string) || !nodePositions.has(edge.target as string)) {
+      edgeOffsets.set(edge.id, { sourceOffset: 0, targetOffset: 0 });
+      continue;
+    }
+    const srcCenter = getHandleCenter(edge.source as string, srcHandle);
+    const tgtCenter = getHandleCenter(edge.target as string, tgtHandle);
+    const dx = tgtCenter.x - srcCenter.x;
+    const dy = tgtCenter.y - srcCenter.y;
+
+    const sourceOffset = computeOffset(srcHandle, dx, dy);
+    const targetOffset = computeOffset(tgtHandle, -dx, -dy);
+
+    edgeOffsets.set(edge.id, { sourceOffset, targetOffset });
+  }
+
+  // When multiple edges share the same handle, spread them further apart
+  // so they don't overlap (add incremental gap on top of directional offset)
+  type HandleEntry = { edgeId: string; side: 'source' | 'target'; dx: number; dy: number };
+  const handleGroups = new Map<string, { handle: string; entries: HandleEntry[] }>();
+
+  for (const edge of filteredEdges) {
+    const srcKey = `${edge.source}:${edge.sourceHandle}`;
+    const tgtKey = `${edge.target}:${edge.targetHandle}`;
+    const srcHandle = edge.sourceHandle as string;
+    const tgtHandle = edge.targetHandle as string;
+    if (!nodePositions.has(edge.source as string) || !nodePositions.has(edge.target as string)) continue;
+    const srcCenter = getHandleCenter(edge.source as string, srcHandle);
+    const tgtCenter = getHandleCenter(edge.target as string, tgtHandle);
+    const dx = tgtCenter.x - srcCenter.x;
+    const dy = tgtCenter.y - srcCenter.y;
+
+    if (!handleGroups.has(srcKey)) handleGroups.set(srcKey, { handle: srcHandle, entries: [] });
+    handleGroups.get(srcKey)!.entries.push({ edgeId: edge.id, side: 'source', dx, dy });
+
+    if (!handleGroups.has(tgtKey)) handleGroups.set(tgtKey, { handle: tgtHandle, entries: [] });
+    handleGroups.get(tgtKey)!.entries.push({ edgeId: edge.id, side: 'target', dx: -dx, dy: -dy });
+  }
+
+  const HANDLE_GAP = 6; // additional px between edges sharing the same handle
+
+  for (const [, { handle, entries }] of handleGroups) {
+    if (entries.length <= 1) continue;
+
+    // Sort by direction so same-direction edges get adjacent slots
+    let sorted: HandleEntry[];
+    if (handle === 'right' || handle === 'left') {
+      sorted = [...entries].sort((a, b) => a.dy - b.dy);
+    } else {
+      sorted = [...entries].sort((a, b) => a.dx - b.dx);
+    }
+
+    // Spread edges within the same directional group
+    for (let i = 0; i < sorted.length; i++) {
+      const additionalOffset = (i - (sorted.length - 1) / 2) * HANDLE_GAP;
+      const entry = sorted[i];
+      const existing = edgeOffsets.get(entry.edgeId)!;
+      if (entry.side === 'source') existing.sourceOffset += additionalOffset;
+      else existing.targetOffset += additionalOffset;
+    }
+  }
+
+  // Merge offsets into edge data
+  for (const edge of filteredEdges) {
+    const offsets = edgeOffsets.get(edge.id);
+    if (offsets) {
+      edge.data = { ...edge.data, sourceOffset: offsets.sourceOffset, targetOffset: offsets.targetOffset };
+    }
+  }
+
+  return { nodes, edges: filteredEdges };
 }
 
 // ─── Hit-testing helpers ──────────────────────────────────────────────────────

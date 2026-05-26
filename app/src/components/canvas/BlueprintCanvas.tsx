@@ -86,8 +86,11 @@ export function BlueprintCanvas() {
   const onNodeDrag = useCallback(
     (_event: unknown, node: { type?: string; id: string; position: { x: number; y: number } }) => {
       if (!blueprint || node.type !== 'action') return;
+      const actionId = node.id.replace('action-', '');
+      const action = blueprint.actions.find((a) => a.id === actionId);
+      const nodeH = action ? estimateActionHeight(action) : ACTION_NODE_HEIGHT;
       const cx = node.position.x + ACTION_NODE_WIDTH / 2;
-      const cy = node.position.y + ACTION_NODE_HEIGHT / 2;
+      const cy = node.position.y + nodeH / 2;
       const cell = getCellFromPosition(cx, cy, blueprint);
       setDragTarget(cell);
 

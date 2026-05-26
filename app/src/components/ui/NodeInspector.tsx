@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, User, Globe, Building2, Users, Activity, Plus, Trash2, Diamond, Film, Image, Tag as TagIcon, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { X, User, Globe, Building2, Users, Activity, Plus, Trash2, Diamond, Tag as TagIcon, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import type { PainPoint, Opportunity, Question, ActionMedia } from '../../types/blueprint';
 import { Panel, IconButton, FieldBlock, TabBar, inputStyle } from './primitives';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { ThreadView } from './CommentThread';
 import { useCommentsStore, commentCountForAnchor } from '../../store/comments.store';
+import { uploadActionMedia, mediaTypeFromFile } from '../../lib/upload';
+import { getBlueprintForVersion } from '../../lib/layout';
 
 type Tab = 'details' | 'pains' | 'opportunities' | 'questions' | 'comments';
 const ACTOR_ICONS = [User, Globe, Building2, Users];
@@ -56,11 +58,15 @@ export function NodeInspector() {
   // Tracks which tab the guest is drafting a new item for (deferred insert until non-empty)
   const [guestDraft, setGuestDraft] = useState<'pain' | 'opp' | 'question' | null>(null);
 
-  const action = blueprint?.actions.find((a) => a.id === selectedNodeId) ?? null;
+  // Use the effective (versioned) blueprint for reading actions/pains/opps/questions
+  const activeVersionId = useBlueprintStore((s) => s.activeVersionId);
+  const effectiveBp = blueprint ? getBlueprintForVersion(blueprint, activeVersionId) : null;
+
+  const action = effectiveBp?.actions.find((a) => a.id === selectedNodeId) ?? null;
   const actor = action ? blueprint?.actors.find((a) => a.id === action.actorId) : null;
-  const painPoints = action ? blueprint!.painPoints.filter((p) => action.painPointIds.includes(p.id)) : [];
-  const opportunities = action ? blueprint!.opportunities.filter((o) => action.opportunityIds.includes(o.id)) : [];
-  const questions = action ? (blueprint!.questions ?? []).filter((q) => (action.questionIds ?? []).includes(q.id)) : [];
+  const painPoints = action ? effectiveBp!.painPoints.filter((p) => action.painPointIds.includes(p.id)) : [];
+  const opportunities = action ? effectiveBp!.opportunities.filter((o) => action.opportunityIds.includes(o.id)) : [];
+  const questions = action ? (effectiveBp!.questions ?? []).filter((q) => (action.questionIds ?? []).includes(q.id)) : [];
 
   // All actions sorted by phase order, then substep order — for cross-phase prev/next navigation
   const allActionsOrdered = blueprint
@@ -201,7 +207,7 @@ export function NodeInspector() {
 
             {/* Media */}
             <FieldBlock label="Media">
-              <MediaSection action={action} onUpdate={(media) => updateAction(action.id, { media })} onLightbox={setLightboxUrl} />
+              <MediaSection action={action} blueprintId={blueprint.id} onUpdate={(media) => updateAction(action.id, { media })} onLightbox={setLightboxUrl} />
             </FieldBlock>
           </>
         )}
@@ -655,83 +661,207 @@ function TouchpointsSection({
 
 function MediaSection({
   action,
+  blueprintId,
   onUpdate,
   onLightbox,
 }: {
   action: { id: string; media?: ActionMedia[] };
+  blueprintId: string;
   onUpdate: (media: ActionMedia[]) => void;
   onLightbox: (url: string) => void;
 }) {
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showUrlInput, setShowUrlInput] = useState(false);
   const [urlDraft, setUrlDraft] = useState('');
-  const media = action.media ?? [];
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
+
+  const current = action.media?.[0] ?? null;
+
+  const setMedia = (item: ActionMedia | null) => {
+    onUpdate(item ? [item] : []);
+  };
+
+  const handleFile = async (file: File) => {
+    setUploadError(null);
+    setUploading(true);
+    const result = await uploadActionMedia(file, blueprintId, action.id);
+    if ('error' in result) {
+      setUploadError(result.error);
+    } else {
+      setMedia({ id: `m-${Date.now()}`, type: mediaTypeFromFile(file), url: result.url });
+    }
+    setUploading(false);
+  };
+
+  const handleFiles = (files: FileList | File[]) => {
+    const file = Array.from(files).find(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+    if (file) handleFile(file);
+  };
 
   const addFromUrl = () => {
     const url = urlDraft.trim();
     if (!url) return;
     const type: ActionMedia['type'] = url.match(/\.(mp4|webm|mov)$/i) ? 'video' : url.match(/\.gif$/i) ? 'gif' : 'image';
-    onUpdate([...media, { id: `m-${Date.now()}`, type, url }]);
+    setMedia({ id: `m-${Date.now()}`, type, url });
     setUrlDraft('');
+    setShowUrlInput(false);
   };
 
-  const remove = (id: string) => onUpdate(media.filter((m) => m.id !== id));
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
+  };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {media.map((m) => (
-        <div key={m.id} style={{
+  const onDragOver = (e: React.DragEvent) => { e.preventDefault(); setDragOver(true); };
+  const onDragLeave = () => setDragOver(false);
+
+  // If there's already an image, show preview + delete
+  if (current) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        <div style={{
           border: '1px solid var(--border-subtle)',
           borderRadius: 'var(--radius-md)',
           overflow: 'hidden',
+          position: 'relative',
         }}>
-          {(m.type === 'image' || m.type === 'gif') && (
-            <div style={{ lineHeight: 0, cursor: 'zoom-in' }} onClick={() => onLightbox(m.url)}>
+          {(current.type === 'image' || current.type === 'gif') && (
+            <div style={{ lineHeight: 0, cursor: 'zoom-in' }} onClick={() => onLightbox(current.url)}>
               <img
-                src={m.url}
+                src={current.url}
                 alt=""
-                style={{ width: '100%', height: 80, objectFit: 'cover', display: 'block' }}
+                style={{ width: '100%', maxHeight: 160, objectFit: 'cover', display: 'block' }}
               />
             </div>
           )}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px',
-            background: 'var(--surface-bg-muted)',
-          }}>
-            {m.type === 'video' ? <Film size={13} color="var(--text-secondary)" style={{ flexShrink: 0 }} /> : <Image size={13} color="var(--text-secondary)" style={{ flexShrink: 0 }} />}
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {m.url}
-            </span>
-            <button onClick={() => remove(m.id)} style={{ color: 'var(--text-muted)', flexShrink: 0, padding: 2 }}>
-              <Trash2 size={11} />
+          {current.type === 'video' && (
+            <video
+              src={current.url}
+              style={{ width: '100%', maxHeight: 160, objectFit: 'cover', display: 'block' }}
+              muted preload="metadata" controls
+            />
+          )}
+          <button
+            onClick={() => setMedia(null)}
+            style={{
+              position: 'absolute',
+              top: 6,
+              right: 6,
+              width: 24,
+              height: 24,
+              borderRadius: 'var(--radius-sm)',
+              background: 'rgba(0,0,0,0.6)',
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: '#fff',
+            }}
+            title="Remove image"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // No image — show drop zone / browse / paste URL
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onClick={() => { if (!showUrlInput) fileInputRef.current?.click(); }}
+        style={{
+          border: `2px dashed ${dragOver ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+          borderRadius: 'var(--radius-md)',
+          padding: '16px 12px',
+          textAlign: 'center',
+          cursor: showUrlInput ? 'default' : 'pointer',
+          background: dragOver ? 'rgba(59,130,246,0.06)' : 'transparent',
+          transition: 'border-color 0.15s, background 0.15s',
+        }}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*"
+          style={{ display: 'none' }}
+          onChange={(e) => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = ''; }}
+        />
+        {uploading ? (
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Uploading…</span>
+        ) : showUrlInput ? (
+          <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+            <input
+              ref={urlInputRef}
+              autoFocus
+              value={urlDraft}
+              onChange={(e) => setUrlDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') addFromUrl();
+                if (e.key === 'Escape') { setShowUrlInput(false); setUrlDraft(''); }
+              }}
+              placeholder="Paste image URL…"
+              style={{ ...inputStyle, flex: 1, fontSize: 12 }}
+            />
+            <button
+              onClick={addFromUrl}
+              disabled={!urlDraft.trim()}
+              style={{
+                padding: '0 10px',
+                background: 'var(--accent-primary)',
+                color: '#fff',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: urlDraft.trim() ? 'pointer' : 'not-allowed',
+                opacity: urlDraft.trim() ? 1 : 0.4,
+              }}
+            >
+              Add
+            </button>
+            <button
+              onClick={() => { setShowUrlInput(false); setUrlDraft(''); }}
+              style={{
+                padding: '0 8px',
+                background: 'var(--surface-bg-muted)',
+                color: 'var(--text-secondary)',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: 'pointer',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              Cancel
             </button>
           </div>
-        </div>
-      ))}
-      <div style={{ display: 'flex', gap: 6 }}>
-        <input
-          value={urlDraft}
-          onChange={(e) => setUrlDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') addFromUrl(); }}
-          placeholder="Paste image, GIF or video URL…"
-          style={{ ...inputStyle, flex: 1, fontSize: 12 }}
-        />
-        <button
-          onClick={addFromUrl}
-          disabled={!urlDraft.trim()}
-          style={{
-            padding: '0 12px',
-            background: 'var(--accent-primary)',
-            color: '#fff',
-            borderRadius: 'var(--radius-md)',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: urlDraft.trim() ? 'pointer' : 'not-allowed',
-            opacity: urlDraft.trim() ? 1 : 0.4,
-            transition: 'opacity 0.15s',
-          }}
-        >
-          Add
-        </button>
+        ) : (
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            Drop image here,{' '}
+            <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>browse</span>
+            , or{' '}
+            <span
+              style={{ color: 'var(--accent-primary)', fontWeight: 600, cursor: 'pointer' }}
+              onClick={(e) => { e.stopPropagation(); setShowUrlInput(true); }}
+            >
+              paste a URL
+            </span>
+          </span>
+        )}
       </div>
+
+      {uploadError && (
+        <span style={{ fontSize: 11, color: 'var(--accent-danger)' }}>{uploadError}</span>
+      )}
     </div>
   );
 }

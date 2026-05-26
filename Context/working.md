@@ -2,6 +2,90 @@
 
 ## Current Objective
 
+**Session AN: Edge ordering + AI badges + UI restructure** — four workstreams covering connector polish, AI-generated indicator badges, navigation/menu rearrangement, and user avatar/profile area.
+
+### Plan
+
+#### AN.1 — Edge ordering at shared handles (connector cleanliness)
+**Problem:** When two connectors leave the same handle (e.g. one goes straight right, one goes up-then-right), they can cross visually because the ordering is arbitrary.
+
+**Fix:** In the handle-offset computation in `layout.ts`, sort edges at each shared handle so that edges going "up" (negative Y delta) are assigned a negative offset (placed above center) and edges going "down" or straight are assigned a positive offset (placed below center). This ensures the upward edge is physically above the straight/downward edge, preventing crossings.
+
+**Implementation:**
+- In the `handleGroups` post-processing pass, when assigning offsets, sort by the edge's target Y relative to source Y (ascending — most-negative-dy first → gets the most-negative offset → visually on top).
+- For target handles, sort by source Y relative to target Y.
+- Keep the "straight edge stays centered" priority — if one edge is perfectly straight (dy ≈ 0), it gets offset 0 regardless.
+
+**Scope:** ~20 lines in `layout.ts` edge-offset section.
+
+#### AN.2 — AI-generated badges on action cards
+**Problem:** AI-generated pains/opps/questions exist in the data but the card badges don't indicate which are AI-generated vs user-created.
+
+**Fix:** Add a small sparkle indicator (✨ or `Sparkles` icon) on the badge pill when ALL items of that type on the action are `aiGenerated: true`. If it's a mix, show a half-sparkle or just the count (no indicator). This gives a quick visual signal without cluttering.
+
+**Implementation:**
+- `ActionNode.tsx`: for each badge type (pain/opp/question), check if every linked item has `aiGenerated: true`. If yes, render a tiny `Sparkles` icon (size 8) next to the count.
+- Need to read `blueprint.painPoints` / `opportunities` / `questions` from the store to check the flag. Currently ActionNode only has the IDs — need to pass the items or a flag in node data.
+- Simplest: pass `aiPainCount`, `aiOppCount`, `aiQuestionCount` in the node data from layout.ts (avoids store reads in the hot render path).
+
+**Scope:** ~15 lines in `layout.ts` (data enrichment), ~20 lines in `ActionNode.tsx` (conditional sparkle render).
+
+#### AN.3 — ViewBar → left-side vertical icon rail
+**Problem:** The edit/pains/opps/questions menu is a dropdown pill in the top-right. User wants it as a vertical icon rail on the left side, icons-only until hover reveals labels, with the active item highlighted.
+
+**Current:** `ViewBar.tsx` — fixed top-right pill with dropdown.
+
+**Target:** New `ViewRail.tsx` — fixed left side, vertically centered, column of icon buttons. Each button:
+- Shows only the icon (Pencil / AlertCircle / Lightbulb / HelpCircle) at rest
+- On hover: expands to show the label text (tooltip or inline expand)
+- Active item: highlighted background + accent color
+- Also includes Present and Comment mode toggles at the bottom of the rail (separated by a divider)
+
+**Implementation:**
+- Create `app/src/components/ui/ViewRail.tsx`
+- Replace `<ViewBar />` with `<ViewRail />` in `App.tsx`
+- Remove or keep `ViewBar.tsx` (can delete since it's fully replaced)
+- Position: `fixed, left: 16, top: 50%, transform: translateY(-50%)`, z-index 50
+- Style: vertical pill container matching existing design system (surface-bg, border-subtle, shadow-sm, radius-pill)
+
+**Scope:** New component (~80 lines), App.tsx import swap, ViewBar.tsx deletion.
+
+#### AN.4 — User avatar + profile area (top-right)
+**Problem:** Top-right currently has ViewBar (being moved). User wants an avatar circle with initials, clicking opens profile/notifications, with a way to access collaborators + share.
+
+**Target:** New `UserMenu.tsx` — fixed top-right:
+- Circle with user initials (derived from `displayName` or `userEmail`), colored background
+- Click → dropdown with:
+  - User name + email
+  - Notifications section (inline list or link to bell)
+  - Divider
+  - "People" row (Users icon) → opens CollaboratorsPanel
+  - "Share link" row (Link icon) → opens share panel
+  - Divider
+  - Sign out
+
+**Implementation:**
+- Create `app/src/components/ui/UserMenu.tsx`
+- Move `NotificationsBell` logic into the dropdown (or keep bell as a separate icon next to the avatar)
+- Move `CollaboratorsPanel` trigger into the dropdown
+- Move Share link trigger into the dropdown
+- Remove these from `ProjectBar` (ProjectBar becomes just the title pill + project switcher)
+- Mount `<UserMenu />` in `App.tsx` where `<ViewBar />` used to be (top-right)
+
+**Scope:** New component (~120 lines), ProjectBar simplification, App.tsx wiring.
+
+### Execution order
+1. **AN.1** — ✅ Done. Edge offsets sorted by direction per handle side.
+2. **AN.2** — ✅ Done. Sparkle badges on AI-generated items.
+3. **AN.3** — ✅ Done. ViewRail on left side replaces ViewBar dropdown.
+4. **AN.4** — ✅ Done. UserMenu avatar top-right with collaborators, notifications, sign out.
+
+### Out of scope
+- Real-time presence (showing other users' cursors) — the avatar circle prepares for this but actual multiplayer is a separate feature
+- Rearranging connector order manually (deferred — AN.1's automatic sorting should handle most cases; if it doesn't we revisit)
+
+---
+
 **Session AM: Lane / phase polish pass — DONE (2026-05-20)** — six UX cleanups + LanesPanel elimination, all shipped this session. Detail of what changed in "Done in Session AM" below; original plan kept further down for reference.
 
 ### Done in Session AM (2026-05-20)
