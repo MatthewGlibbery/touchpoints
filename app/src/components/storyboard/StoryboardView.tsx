@@ -2,12 +2,11 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   ArrowLeft, Sparkles, Settings2, RefreshCw, Trash2, Plus,
   ChevronDown, Loader2, ImageOff, Film, Download, Play, X, ChevronLeft, ChevronRight,
-  BookMarked,
 } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { buildImagePrompt } from '../../lib/storyboard';
-import { loadPresets, savePreset, deletePreset } from '../../lib/styleLibrary';
-import type { StylePreset } from '../../lib/styleLibrary';
+import { STYLE_PRESETS, getPreset } from '../../lib/styleLibrary';
+import type { StylePresetId } from '../../lib/styleLibrary';
 import type { StoryboardStyleGuide, StoryboardFrame } from '../../types/blueprint';
 
 // ─── Download helper ──────────────────────────────────────────────────────────
@@ -1172,7 +1171,7 @@ function EmptyState({ onGenerate }: { onGenerate: () => void }) {
         </p>
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, maxWidth: 320 }}>
           Generate a journey map from your blueprint. Claude will create scenes and captions;
-          {' DALL-E 3 will illustrate each frame.'}
+          {' AI will illustrate each frame in your chosen visual style.'}
         </p>
       </div>
       <button
@@ -1203,12 +1202,11 @@ function StyleGuideModal({
   onRegenerateAll: () => void;
   onClose: () => void;
 }) {
+  const [selectedPresetId, setSelectedPresetId] = useState<StylePresetId>(
+    (storyboard.styleGuide.baseStyle as StylePresetId) || 'editorial-illustration'
+  );
   const [guide, setGuide] = useState<StoryboardStyleGuide>({ ...storyboard.styleGuide });
   const [previewFrameIdx, setPreviewFrameIdx] = useState(0);
-  const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets());
-  const [savingPreset, setSavingPreset] = useState(false);
-  const [presetName, setPresetName] = useState('');
-  const presetInputRef = useRef<HTMLInputElement>(null);
 
   const updateChar = (actorId: string, text: string) => {
     setGuide((g) => ({
@@ -1217,38 +1215,25 @@ function StyleGuideModal({
     }));
   };
 
+  const handleSelectPreset = (id: StylePresetId) => {
+    setSelectedPresetId(id);
+    setGuide((g) => ({ ...g, baseStyle: id }));
+  };
+
   const handleSave = () => {
-    onUpdate(guide);
+    onUpdate({ ...guide, baseStyle: selectedPresetId });
     onClose();
   };
 
   const handleSaveAndRegenerate = () => {
-    onUpdate(guide);
+    onUpdate({ ...guide, baseStyle: selectedPresetId });
     onClose();
     onRegenerateAll();
   };
 
-  const handleSavePreset = () => {
-    const name = presetName.trim();
-    if (!name) return;
-    const preset = savePreset(name, guide.baseStyle);
-    setPresets((prev) => [...prev, preset]);
-    setPresetName('');
-    setSavingPreset(false);
-  };
-
-  const handleDeletePreset = (id: string) => {
-    deletePreset(id);
-    setPresets((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  const handleApplyPreset = (preset: StylePreset) => {
-    setGuide((g) => ({ ...g, baseStyle: preset.baseStyle }));
-  };
-
   const previewFrame = frames[previewFrameIdx];
   const previewPrompt = previewFrame
-    ? buildImagePrompt(previewFrame, guide, actors)
+    ? buildImagePrompt(previewFrame, { ...guide, baseStyle: selectedPresetId }, actors)
     : null;
 
   return (
@@ -1266,7 +1251,7 @@ function StyleGuideModal({
           background: 'var(--surface-bg)',
           borderRadius: 'var(--radius-lg)',
           boxShadow: 'var(--shadow-md)',
-          width: 580,
+          width: 640,
           maxWidth: 'calc(100vw - 48px)',
           maxHeight: '85vh',
           display: 'flex',
@@ -1285,7 +1270,7 @@ function StyleGuideModal({
               Style Guide
             </h3>
             <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-              Visual style and character descriptions used for image generation
+              Choose a visual style and review character descriptions
             </p>
           </div>
           <button
@@ -1302,131 +1287,59 @@ function StyleGuideModal({
         {/* Content */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-          {/* Base style + presets */}
+          {/* Style preset picker */}
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <label style={{
-                fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
-                letterSpacing: '0.06em', textTransform: 'uppercase',
-              }}>
-                Base Style
-              </label>
-              {!savingPreset ? (
-                <button
-                  onClick={() => { setSavingPreset(true); setTimeout(() => presetInputRef.current?.focus(), 0); }}
-                  title="Save current base style as a reusable preset"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 4,
-                    fontSize: 11, padding: '3px 8px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid var(--border-subtle)', background: 'transparent',
-                    color: 'var(--text-muted)', cursor: 'pointer',
-                  }}
-                >
-                  <BookMarked size={11} />
-                  Save as preset
-                </button>
-              ) : (
-                <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                  <input
-                    ref={presetInputRef}
-                    value={presetName}
-                    onChange={(e) => setPresetName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSavePreset();
-                      if (e.key === 'Escape') { setSavingPreset(false); setPresetName(''); }
-                    }}
-                    placeholder="Preset name…"
-                    style={{
-                      fontSize: 12, padding: '3px 7px', width: 140,
-                      borderRadius: 4, border: '1px solid var(--border-subtle)',
-                      background: 'var(--surface-bg)', color: 'var(--text-primary)', outline: 'none',
-                    }}
-                  />
+            <label style={{
+              fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              display: 'block', marginBottom: 10,
+            }}>
+              Visual Style
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
+              {STYLE_PRESETS.map((preset) => {
+                const isActive = preset.id === selectedPresetId;
+                return (
                   <button
-                    onClick={handleSavePreset}
+                    key={preset.id}
+                    onClick={() => handleSelectPreset(preset.id)}
                     style={{
-                      fontSize: 11, padding: '3px 8px', borderRadius: 4,
-                      border: 'none', background: 'var(--accent-primary)', color: '#fff', cursor: 'pointer',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center',
+                      padding: 8, borderRadius: 'var(--radius-md)',
+                      border: `2px solid ${isActive ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
+                      background: isActive ? 'var(--accent-primary-soft)' : 'var(--surface-bg)',
+                      cursor: 'pointer', transition: 'all 150ms',
+                      gap: 6,
                     }}
                   >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => { setSavingPreset(false); setPresetName(''); }}
-                    style={{
-                      fontSize: 11, padding: '3px 6px', borderRadius: 4,
-                      border: '1px solid var(--border-subtle)', background: 'transparent',
-                      color: 'var(--text-muted)', cursor: 'pointer',
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <textarea
-              value={guide.baseStyle}
-              onChange={(e) => setGuide((g) => ({ ...g, baseStyle: e.target.value }))}
-              rows={2}
-              style={{
-                width: '100%', padding: '8px 10px',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--border-subtle)',
-                background: 'var(--surface-bg-muted)', color: 'var(--text-primary)',
-                fontSize: 13, lineHeight: 1.5, resize: 'vertical',
-                fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
-              }}
-            />
-
-            {/* Saved presets */}
-            {presets.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <BookMarked size={10} />
-                  Saved presets — click to apply
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {presets.map((preset) => (
-                    <div
-                      key={preset.id}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 0,
-                        borderRadius: 'var(--radius-pill)',
-                        border: `1px solid ${preset.baseStyle === guide.baseStyle ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
-                        background: preset.baseStyle === guide.baseStyle ? 'var(--accent-primary-soft)' : 'var(--surface-bg-muted)',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <button
-                        onClick={() => handleApplyPreset(preset)}
-                        title={preset.baseStyle}
-                        style={{
-                          fontSize: 12, padding: '4px 10px',
-                          background: 'transparent', border: 'none', cursor: 'pointer',
-                          color: preset.baseStyle === guide.baseStyle ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                          fontWeight: preset.baseStyle === guide.baseStyle ? 600 : 400,
+                    {/* Example image */}
+                    <div style={{
+                      width: '100%', aspectRatio: '16/10', borderRadius: 'var(--radius-sm)',
+                      overflow: 'hidden', background: 'var(--surface-bg-muted)',
+                    }}>
+                      <img
+                        src={preset.exampleImage}
+                        alt={preset.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
                         }}
-                      >
-                        {preset.name}
-                      </button>
-                      <button
-                        onClick={() => handleDeletePreset(preset.id)}
-                        title="Delete preset"
-                        style={{
-                          padding: '4px 7px 4px 2px',
-                          background: 'transparent', border: 'none', cursor: 'pointer',
-                          color: 'var(--text-muted)', display: 'flex', alignItems: 'center',
-                        }}
-                      >
-                        <X size={10} />
-                      </button>
+                      />
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
+                    <span style={{
+                      fontSize: 10, fontWeight: isActive ? 700 : 500,
+                      color: isActive ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                      textAlign: 'center', lineHeight: 1.2,
+                    }}>
+                      {preset.name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+              {getPreset(selectedPresetId).description}
+            </p>
           </div>
 
           {/* Character descriptions */}
@@ -1499,7 +1412,7 @@ function StyleGuideModal({
               <textarea
                 readOnly
                 value={previewPrompt ?? ''}
-                rows={4}
+                rows={5}
                 style={{
                   width: '100%', padding: '8px 10px',
                   borderRadius: 'var(--radius-sm)',
@@ -1511,7 +1424,7 @@ function StyleGuideModal({
                 }}
               />
               <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-                Live preview of how this style guide assembles into a DALL-E prompt.
+                Live preview of how this style guide assembles into an image prompt.
               </p>
             </div>
           )}

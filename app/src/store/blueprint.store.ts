@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type { Node, Edge } from '@xyflow/react';
-import type { Blueprint, BlueprintVersion, Action, Actor, Phase, PainPoint, Opportunity, Question, EdgeMeta, CustomEdge, Presentation, PresentationKeyframe, Storyboard, StoryboardFrame, StoryboardStyleGuide, StatusLane, TimelineLane, LaneSegment, CommentAnchor } from '../types/blueprint';
+import type { Blueprint, BlueprintVersion, Action, Actor, Phase, PainPoint, Opportunity, Question, EdgeMeta, CustomEdge, Presentation, PresentationKeyframe, Storyboard, StoryboardFrame, StoryboardStyleGuide, StatusLane, TimelineLane, LaneSegment, CommentAnchor, FrameworkAxis, Framework } from '../types/blueprint';
 import { generateStyleGuide, generateFrameStructure, buildImagePrompt, generateImage } from '../lib/storyboard';
 import { blueprintToFlow, computeColumnData, getBlueprintForVersion, ACTION_NODE_WIDTH, estimateActionHeight } from '../lib/layout';
 import { saveBlueprint, loadBlueprint, loadAllBlueprints, switchBlueprint, fetchBlueprintsFromCloud, migrateLocalBlueprints, importBlueprintsToCloud, getBlueprintRowId, fetchBlueprintByRowId } from '../lib/storage';
@@ -231,6 +231,22 @@ type AppState = {
   regenerateFrame: (storyboardId: string, frameId: string) => Promise<void>;
   regenerateAllFrames: (storyboardId: string) => Promise<void>;
   reorderStoryboardFrames: (storyboardId: string, fromIdx: number, toIdx: number) => void;
+
+  // Frameworks
+  frameworkMode: boolean;
+  activeFrameworkId: string | null;
+  activeAxisId: string | null;
+  setFrameworkMode: (on: boolean) => void;
+  setActiveFramework: (id: string | null) => void;
+  setActiveAxis: (id: string | null) => void;
+  addFrameworkAxis: (title: string, lowLabel: string, highLabel: string) => string;
+  updateFrameworkAxis: (id: string, patch: Partial<Pick<FrameworkAxis, 'title' | 'lowLabel' | 'highLabel'>>) => void;
+  removeFrameworkAxis: (id: string) => void;
+  addFramework: (name: string, axisIds: string[], mode: '2d' | '3d') => string;
+  updateFramework: (id: string, patch: Partial<Pick<Framework, 'name' | 'axisIds' | 'mode'>>) => void;
+  removeFramework: (id: string) => void;
+  setCardAxisPosition: (axisId: string, cardId: string, value: number) => void;
+  removeCardFromAxis: (axisId: string, cardId: string) => void;
 
   // Undo / Redo
   undoStack: Blueprint[];
@@ -556,6 +572,9 @@ export const useBlueprintStore = create<AppState>()(
       storyboardGenerating: false,
       storyboardGeneratingFrameId: null,
       activeStoryboardId: null,
+      frameworkMode: false,
+      activeFrameworkId: null,
+      activeAxisId: null,
       actorPortraitGenerating: null,
       undoStack: [],
       redoStack: [],
@@ -625,7 +644,7 @@ export const useBlueprintStore = create<AppState>()(
           compareMode: false, compareVersionIds: [null, null] as [null, null],
           presentMode: false, presentationEditMode: false,
           activePresentationId: null, currentKeyframeIndex: 0,
-          storyboardMode: false,
+          storyboardMode: false, frameworkMode: false,
           overviewMode: false, selectedOverviewCell: null,
           multiSelectedNodeIds: [], selectedColumnKey: null,
           undoStack: [], redoStack: [],
@@ -1671,6 +1690,7 @@ export const useBlueprintStore = create<AppState>()(
             presentMode: false,
             presentationEditMode: false,
             storyboardMode: false,
+            frameworkMode: false,
             // Close any open inspectors so they can't be edited
             inspectorOpen: false,
             actorPanelOpen: false,
@@ -2296,7 +2316,7 @@ Return ONLY a JSON object in this exact format:
       setStoryboardMode: (on) => {
         set({
           storyboardMode: on,
-          ...(on ? { compareMode: false, presentMode: false, presentationEditMode: false, overviewMode: false, commentMode: false } : {}),
+          ...(on ? { frameworkMode: false, compareMode: false, presentMode: false, presentationEditMode: false, overviewMode: false, commentMode: false } : {}),
         });
       },
 
@@ -2307,7 +2327,7 @@ Return ONLY a JSON object in this exact format:
         const sb: Storyboard = {
           id,
           name,
-          styleGuide: { baseStyle: 'anime key visual, crisp linework, cel shading, vibrant colors, clean background', characterDescriptions: {} },
+          styleGuide: { baseStyle: 'editorial-illustration', characterDescriptions: {} },
           frames: [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -2416,7 +2436,7 @@ Return ONLY a JSON object in this exact format:
             const newSb: Storyboard = {
               id,
               name: 'Journey Map 1',
-              styleGuide: { baseStyle: 'anime key visual, crisp linework, cel shading, vibrant colors, clean background', characterDescriptions: {} },
+              styleGuide: { baseStyle: 'editorial-illustration', characterDescriptions: {} },
               frames: [],
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
@@ -2596,6 +2616,120 @@ Return ONLY a JSON object in this exact format:
           set({ actorPortraitGenerating: null });
         }
       },
+
+      // ─── Frameworks ─────────────────────────────────────────────────────────
+
+      setFrameworkMode: (on) => {
+        set({
+          frameworkMode: on,
+          ...(on ? { storyboardMode: false, compareMode: false, presentMode: false, presentationEditMode: false, overviewMode: false, commentMode: false } : {}),
+        });
+      },
+
+      setActiveFramework: (id) => set({ activeFrameworkId: id }),
+      setActiveAxis: (id) => set({ activeAxisId: id }),
+
+      addFrameworkAxis: (title, lowLabel, highLabel) => {
+        const { blueprint } = get();
+        if (!blueprint) return '';
+        const id = `axis-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const axis: FrameworkAxis = { id, title, lowLabel, highLabel, cardPositions: {} };
+        const newBp = updatedAt({ ...blueprint, frameworkAxes: [...(blueprint.frameworkAxes ?? []), axis] });
+        saveBlueprint(newBp);
+        set({ blueprint: newBp, activeAxisId: id });
+        return id;
+      },
+
+      updateFrameworkAxis: (id, patch) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const newBp = updatedAt({
+          ...blueprint,
+          frameworkAxes: (blueprint.frameworkAxes ?? []).map((a) => a.id === id ? { ...a, ...patch } : a),
+        });
+        saveBlueprint(newBp);
+        set({ blueprint: newBp });
+      },
+
+      removeFrameworkAxis: (id) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const newBp = updatedAt({
+          ...blueprint,
+          frameworkAxes: (blueprint.frameworkAxes ?? []).filter((a) => a.id !== id),
+          // Remove axis from any frameworks that reference it
+          frameworks: (blueprint.frameworks ?? []).map((f) => ({
+            ...f,
+            axisIds: f.axisIds.filter((aId) => aId !== id),
+          })).filter((f) => f.axisIds.length >= 2),
+        });
+        saveBlueprint(newBp);
+        set({ blueprint: newBp });
+      },
+
+      addFramework: (name, axisIds, mode) => {
+        const { blueprint } = get();
+        if (!blueprint) return '';
+        const id = `fw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const framework: Framework = { id, name, axisIds, mode };
+        const newBp = updatedAt({ ...blueprint, frameworks: [...(blueprint.frameworks ?? []), framework] });
+        saveBlueprint(newBp);
+        set({ blueprint: newBp, activeFrameworkId: id });
+        return id;
+      },
+
+      updateFramework: (id, patch) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const newBp = updatedAt({
+          ...blueprint,
+          frameworks: (blueprint.frameworks ?? []).map((f) => f.id === id ? { ...f, ...patch } : f),
+        });
+        saveBlueprint(newBp);
+        set({ blueprint: newBp });
+      },
+
+      removeFramework: (id) => {
+        const { blueprint, activeFrameworkId } = get();
+        if (!blueprint) return;
+        const newBp = updatedAt({
+          ...blueprint,
+          frameworks: (blueprint.frameworks ?? []).filter((f) => f.id !== id),
+        });
+        saveBlueprint(newBp);
+        const newActiveId = activeFrameworkId === id ? ((newBp.frameworks ?? [])[0]?.id ?? null) : activeFrameworkId;
+        set({ blueprint: newBp, activeFrameworkId: newActiveId });
+      },
+
+      setCardAxisPosition: (axisId, cardId, value) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const clamped = Math.max(0, Math.min(9, Math.round(value)));
+        const newBp = updatedAt({
+          ...blueprint,
+          frameworkAxes: (blueprint.frameworkAxes ?? []).map((a) => {
+            if (a.id !== axisId) return a;
+            return { ...a, cardPositions: { ...a.cardPositions, [cardId]: clamped } };
+          }),
+        });
+        saveBlueprint(newBp);
+        set({ blueprint: newBp });
+      },
+
+      removeCardFromAxis: (axisId, cardId) => {
+        const { blueprint } = get();
+        if (!blueprint) return;
+        const newBp = updatedAt({
+          ...blueprint,
+          frameworkAxes: (blueprint.frameworkAxes ?? []).map((a) => {
+            if (a.id !== axisId) return a;
+            const { [cardId]: _, ...rest } = a.cardPositions;
+            return { ...a, cardPositions: rest };
+          }),
+        });
+        saveBlueprint(newBp);
+        set({ blueprint: newBp });
+      },
     };
   })
 );
@@ -2623,7 +2757,7 @@ if (_shareToken) {
       _bootPromise = null; // Cancel any in-flight boot so the next login boots fresh
       useBlueprintStore.setState({ mode: 'auth', userId: null, userEmail: null,
         displayName: null, pendingNameCapture: false, blueprint: null,
-        rfNodes: [], rfEdges: [], activeVersionId: null, storyboardMode: false });
+        rfNodes: [], rfEdges: [], activeVersionId: null, storyboardMode: false, frameworkMode: false });
     }
   });
 

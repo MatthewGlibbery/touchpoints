@@ -7,11 +7,37 @@ const DOT_BASE_RADIUS = 1;
 const DOT_MAX_RADIUS = 1.55;
 const EFFECT_RADIUS = 80;
 
+// ─── Color helpers ────────────────────────────────────────────────────────────
+
+function parseHex(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return [r, g, b];
+}
+
+function toHex(r: number, g: number, b: number): string {
+  return '#' + [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+}
+
+function darkenHex(hex: string, amount: number): string {
+  const [r, g, b] = parseHex(hex);
+  return toHex(r * (1 - amount), g * (1 - amount), b * (1 - amount));
+}
+
+function lerpColor(a: string, b: string, t: number): string {
+  const [r1, g1, b1] = parseHex(a);
+  const [r2, g2, b2] = parseHex(b);
+  return toHex(r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t);
+}
+
 export function DotBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
   const rafRef = useRef<number>(0);
   const dotColorRef = useRef('#DDE1E7');
+  const dotHoverColorRef = useRef('#A0A8B4');
 
   const theme = useBlueprintStore((s) => s.theme);
   const transform = useStore((s) => s.transform);
@@ -22,6 +48,9 @@ export function DotBackground() {
     dotColorRef.current =
       getComputedStyle(document.documentElement).getPropertyValue('--canvas-grid').trim() ||
       '#DDE1E7';
+    // Darker variant for hover — mix the base color toward a darker shade
+    const base = dotColorRef.current;
+    dotHoverColorRef.current = darkenHex(base, 0.15);
   }, [theme]);
 
   useEffect(() => {
@@ -60,12 +89,14 @@ export function DotBackground() {
       const mouse = mouseRef.current;
 
       ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = dotColorRef.current;
 
       const startI = Math.floor(-tx / (DOT_GAP * zoom)) - 1;
       const endI   = Math.ceil((width  - tx) / (DOT_GAP * zoom)) + 1;
       const startJ = Math.floor(-ty / (DOT_GAP * zoom)) - 1;
       const endJ   = Math.ceil((height - ty) / (DOT_GAP * zoom)) + 1;
+
+      const baseColor = dotColorRef.current;
+      const hoverColor = dotHoverColorRef.current;
 
       for (let i = startI; i <= endI; i++) {
         for (let j = startJ; j <= endJ; j++) {
@@ -74,6 +105,7 @@ export function DotBackground() {
 
           // Scale radius with zoom so dots shrink/grow with the canvas
           let r = DOT_BASE_RADIUS * zoom;
+          let color = baseColor;
           if (mouse) {
             const dx = sx - mouse.x;
             const dy = sy - mouse.y;
@@ -82,9 +114,11 @@ export function DotBackground() {
               const t = 1 - dist / EFFECT_RADIUS;
               const s = t * t * (3 - 2 * t); // smoothstep
               r = zoom * (DOT_BASE_RADIUS + (DOT_MAX_RADIUS - DOT_BASE_RADIUS) * s);
+              color = lerpColor(baseColor, hoverColor, s);
             }
           }
 
+          ctx.fillStyle = color;
           ctx.beginPath();
           ctx.arc(sx, sy, r, 0, Math.PI * 2);
           ctx.fill();

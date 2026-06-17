@@ -1,12 +1,22 @@
 import { supabase } from './supabase';
+import { getPreset } from './styleLibrary';
+import type { StylePresetId } from './styleLibrary';
 import type { Blueprint, Actor, StoryboardStyleGuide, StoryboardFrame } from '../types/blueprint';
+
+// ─── Universal blocks (appended to every prompt) ──────────────────────────────
+
+const UNIVERSAL_CONTINUITY = `Maintain visual continuity across all storyboard frames. The same named character must retain the same age, facial structure, hairstyle, body type, skin tone, clothing, accessories, and recognizable silhouette in every image. The visual style, color palette, lighting logic, level of detail, and environment design language must remain consistent across the full journey map. The image should show one clear service moment with readable body language and an uncluttered composition suitable for journey-map storyboarding.`;
+
+const UNIVERSAL_OUTPUT = `Create a single storyboard frame for a service journey map. The image should be horizontally oriented, presentation-ready, clean, readable at small sizes, and leave some open space for labels or annotations. Do not include text, captions, speech bubbles, logos, watermarks, UI text, brand marks, or written words inside the image unless explicitly requested.`;
 
 // ─── Style guide generation ───────────────────────────────────────────────────
 
 export async function generateStyleGuide(
   blueprint: Blueprint,
-  baseStyle: string
+  stylePresetId: string
 ): Promise<StoryboardStyleGuide> {
+  const preset = getPreset(stylePresetId);
+
   const actorList = blueprint.actors
     .sort((a, b) => a.order - b.order)
     .map((a) => `- ${a.name}${a.bio ? `: ${a.bio}` : ''}${a.goals ? ` (goals: ${a.goals})` : ''}`)
@@ -16,11 +26,12 @@ export async function generateStyleGuide(
     body: {
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: `You are a character designer for an anime storyboard. Given a list of actors from a service blueprint, create vivid, specific visual character descriptions that will produce consistent illustrations when used in image generation prompts.
+      system: `You are a character designer for a storyboard. Given a list of actors from a service blueprint, create vivid, specific visual character descriptions that will produce consistent illustrations when used in image generation prompts.
 
-Each description must be 1–2 sentences covering: approximate age, gender, hair (color + style), skin tone, key clothing/outfit, distinctive features, and typical expression/body language. Write in a style optimized for image generation prompts (descriptive phrases, not sentences).
+Each description must be 1–2 sentences covering: approximate age, gender, hair (color + style), skin tone, key clothing/outfit, distinctive features, and typical expression/body language. Write in a style optimized for image generation prompts (descriptive phrases, not full sentences).
 
-Style context: ${baseStyle}`,
+Visual style context: ${preset.name} — ${preset.description}
+Character rendering guidance: ${preset.characterPrompt}`,
       tools: [characterDescTool],
       tool_choice: { type: 'any' },
       messages: [
@@ -32,11 +43,11 @@ Style context: ${baseStyle}`,
     },
   });
 
-  if (error || !data) return { baseStyle, characterDescriptions: {} };
+  if (error || !data) return { baseStyle: stylePresetId, characterDescriptions: {} };
 
   const content = (data as { content: Array<{ type: string; input?: unknown }> }).content;
   const toolUse = content.find((b) => b.type === 'tool_use');
-  if (!toolUse) return { baseStyle, characterDescriptions: {} };
+  if (!toolUse) return { baseStyle: stylePresetId, characterDescriptions: {} };
 
   const raw = toolUse.input as { characters: Array<{ actorName: string; description: string }> };
   const characterDescriptions: Record<string, string> = {};
@@ -50,7 +61,8 @@ Style context: ${baseStyle}`,
     }
   }
 
-  return { baseStyle, characterDescriptions };
+  // baseStyle now stores the preset ID (e.g. 'editorial-illustration')
+  return { baseStyle: stylePresetId, characterDescriptions };
 }
 
 // ─── Frame structure generation ──────────────────────────────────────────────
@@ -79,13 +91,14 @@ export async function generateFrameStructure(
     body: {
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
-      system: `You are a storyboard director for an anime-style visual narrative. Given a service blueprint, create storyboard frames that tell the story of the service journey in a compelling, cinematic way.
+      system: `You are a storyboard director for a visual narrative. Given a service blueprint, create storyboard frames that tell the story of the service journey in a compelling, cinematic way.
 
 Each frame should:
 - Capture a key dramatic or emotional moment in the journey
 - Show characters interacting naturally with each other or the environment
 - Have a concise, evocative caption (1–2 sentences, narrative voice, present tense)
 - Include a vivid scene description that will work well as an image prompt
+- Include an environment description (the location/setting for the scene)
 
 Create one frame per phase (combine minor phases if needed). Frames should flow as a coherent visual story.`,
       tools: [frameStructureTool],
@@ -110,6 +123,7 @@ Create one frame per phase (combine minor phases if needed). Frames should flow 
       phaseNames: string[];
       actorNames: string[];
       sceneDescription: string;
+      environmentDescription?: string;
       caption: string;
     }>;
   };
@@ -119,6 +133,7 @@ Create one frame per phase (combine minor phases if needed). Frames should flow 
 
   return (raw.frames ?? []).map((f) => ({
     sceneDescription: f.sceneDescription,
+    environmentDescription: f.environmentDescription,
     caption: f.caption,
     phaseIds: (f.phaseNames ?? []).map((n) => phaseByName.get(n.toLowerCase())?.id).filter(Boolean) as string[],
     actorIds: (f.actorNames ?? []).map((n) => actorByName.get(n.toLowerCase())?.id).filter(Boolean) as string[],
@@ -126,32 +141,57 @@ Create one frame per phase (combine minor phases if needed). Frames should flow 
   }));
 }
 
-// ─── Image prompt construction ───────────────────────────────────────────────
+// ─── Image prompt construction (structured format from style doc) ─────────────
 
 export function buildImagePrompt(
   frame: Pick<StoryboardFrame, 'sceneDescription' | 'actorIds'>,
   styleGuide: StoryboardStyleGuide,
   actors: Actor[]
 ): string {
-  const charDescs = frame.actorIds
+  const preset = getPreset(styleGuide.baseStyle as StylePresetId);
+
+  // Build character descriptions
+  const primaryChars = frame.actorIds
     .map((id) => {
       const actor = actors.find((a) => a.id === id);
       const desc = styleGuide.characterDescriptions[id];
-      return actor && desc ? `${actor.name} (${desc})` : null;
+      if (!actor) return null;
+      if (desc) return `${actor.name} (${desc}). ${actor.name} should retain the same identity, hairstyle, clothing, body type, and recognizable silhouette in every storyboard frame.`;
+      return `${actor.name}`;
     })
     .filter(Boolean) as string[];
 
   const parts = [
-    styleGuide.baseStyle,
-    frame.sceneDescription,
-    ...(charDescs.length ? [`Characters: ${charDescs.join('; ')}`] : []),
-    'detailed illustration, high quality',
+    // 1. Master style prompt
+    preset.masterPrompt,
+    '',
+    // 2. Scene description
+    `Scene:\n${frame.sceneDescription}`,
+    '',
+    // 3. Primary character(s)
+    ...(primaryChars.length
+      ? [`Primary Character:\n${primaryChars[0]}`, '']
+      : []),
+    ...(primaryChars.length > 1
+      ? [`Supporting Characters:\n${primaryChars.slice(1).join('\n')}`, '']
+      : []),
+    // 4. Composition
+    `Composition:\n${preset.compositionPrompt}`,
+    '',
+    // 5. Continuity
+    `Continuity Requirements:\n${UNIVERSAL_CONTINUITY}`,
+    '',
+    // 6. Output requirements
+    `Output Requirements:\n${UNIVERSAL_OUTPUT}`,
+    '',
+    // 7. Negative constraints
+    preset.negativePrompt,
   ];
 
-  return parts.join(', ');
+  return parts.join('\n');
 }
 
-// ─── Image generation (DALL-E 3 via Edge Function → Supabase Storage) ────────
+// ─── Image generation (Nano Banana via Edge Function → Supabase Storage) ─────
 
 export async function generateImage(
   prompt: string,
@@ -167,7 +207,12 @@ export async function generateImage(
     return null;
   }
 
-  return (data as { url: string | null }).url ?? null;
+  const result = data as { url: string | null; error?: string };
+  if (result.error) {
+    console.error('Image generation error:', result.error);
+  }
+
+  return result.url ?? null;
 }
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
@@ -224,6 +269,10 @@ const frameStructureTool = {
             sceneDescription: {
               type: 'string',
               description: 'Vivid scene description for image generation: setting, action, mood, composition, lighting',
+            },
+            environmentDescription: {
+              type: 'string',
+              description: 'The location and setting: physical space, key props, atmosphere',
             },
             caption: {
               type: 'string',

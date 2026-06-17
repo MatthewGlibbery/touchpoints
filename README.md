@@ -24,7 +24,7 @@ Most teams build these in Miro or Figma — freeform tools that require manual l
 
 **Presentations** — Capture viewport positions as slides and play them back as a guided walkthrough of the blueprint for stakeholders.
 
-**Journey Maps** — Generate a visual storyboard of the service using DALL-E 3, with consistent character illustrations per actor. Useful for communicating the human experience to a non-technical audience.
+**Journey Maps** — Generate a visual storyboard of the service using AI image generation, with consistent character illustrations per actor. Choose from five visual styles (3D animated, claymation, editorial, photorealistic, corporate). Useful for communicating the human experience to a non-technical audience.
 
 ---
 
@@ -51,8 +51,12 @@ cp .env.example .env.local
 ```
 
 Open `.env.local` and add:
-- `VITE_ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com). Required for blueprint generation.
-- `VITE_OPENAI_API_KEY` — from [platform.openai.com](https://platform.openai.com/api-keys). Optional; only needed for Journey Map image generation.
+- `VITE_SUPABASE_URL` — your Supabase project URL.
+- `VITE_SUPABASE_ANON_KEY` — your Supabase anon key.
+
+AI keys are Supabase Edge Function secrets (not client-side):
+- `ANTHROPIC_API_KEY` — for blueprint/storyboard text generation.
+- `GOOGLE_AI_API_KEY` — for Journey Map image generation (Google AI Studio / Nano Banana).
 
 **4. Start the app**
 ```
@@ -65,7 +69,7 @@ Then open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## Tech
 
-React · TypeScript · Vite · ReactFlow · Zustand · Anthropic Claude API · OpenAI DALL-E 3
+React · TypeScript · Vite · ReactFlow · Zustand · Anthropic Claude API · Google Nano Banana
 
 ---
 
