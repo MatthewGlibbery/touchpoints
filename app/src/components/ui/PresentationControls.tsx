@@ -1,8 +1,25 @@
-import { useEffect } from 'react';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { ChevronLeft, ChevronRight, X, RotateCcw } from 'lucide-react';
+import { useStore } from '@xyflow/react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { animateToViewport } from '../../lib/viewportBridge';
 import type { PresentationKeyframe } from '../../types/blueprint';
+
+// Threshold for considering the viewport "moved" from the slide position
+const VP_THRESHOLD = 8; // px
+const ZOOM_THRESHOLD = 0.02;
+
+function hasViewportDrifted(
+  current: [number, number, number],
+  target: { x: number; y: number; zoom: number }
+): boolean {
+  const [tx, ty, zoom] = current;
+  return (
+    Math.abs(tx - target.x) > VP_THRESHOLD ||
+    Math.abs(ty - target.y) > VP_THRESHOLD ||
+    Math.abs(zoom - target.zoom) > ZOOM_THRESHOLD
+  );
+}
 
 export function PresentationControls() {
   const blueprint              = useBlueprintStore((s) => s.blueprint);
@@ -15,6 +32,24 @@ export function PresentationControls() {
   const activePresentation = presentations.find((p) => p.id === activePresentationId) ?? presentations[0] ?? null;
   const keyframes = activePresentation?.keyframes ?? [];
   const total = keyframes.length;
+
+  // Track viewport drift from the current slide
+  const transform = useStore((s) => s.transform);
+  const currentKf: PresentationKeyframe | undefined = keyframes[currentKfIdx];
+  const [drifted, setDrifted] = useState(false);
+
+  useEffect(() => {
+    if (!currentKf || currentKf.compareMode) {
+      setDrifted(false);
+      return;
+    }
+    setDrifted(hasViewportDrifted(transform, currentKf.viewport));
+  }, [transform, currentKf]);
+
+  // Reset drift flag when slide changes
+  useEffect(() => {
+    setDrifted(false);
+  }, [currentKfIdx]);
 
   // On mount: apply the starting keyframe's state
   useEffect(() => {
@@ -74,6 +109,11 @@ export function PresentationControls() {
     }
   };
 
+  const handleReset = useCallback(() => {
+    if (!currentKf || currentKf.compareMode) return;
+    animateToViewport(currentKf.viewport, 400);
+  }, [currentKf]);
+
   const handleExit = () => {
     useBlueprintStore.setState({ presentMode: false, presentationEditMode: true });
   };
@@ -86,8 +126,6 @@ export function PresentationControls() {
       </div>
     );
   }
-
-  const currentKf: PresentationKeyframe | undefined = keyframes[currentKfIdx];
 
   return (
     <div style={containerStyle}>
@@ -119,6 +157,17 @@ export function PresentationControls() {
       >
         <ChevronRight size={15} />
       </button>
+
+      {/* Reset viewport button — visible only when user has panned/zoomed away */}
+      {drifted && (
+        <button
+          onClick={handleReset}
+          title="Reset to slide position"
+          style={resetBtnStyle}
+        >
+          <RotateCcw size={13} />
+        </button>
+      )}
 
       <div style={{ width: 1, height: 16, background: 'var(--border-subtle)', margin: '0 2px' }} />
 
@@ -159,6 +208,19 @@ const navBtnStyle = (disabled: boolean): React.CSSProperties => ({
   cursor: disabled ? 'not-allowed' : 'pointer',
   opacity: disabled ? 0.4 : 1,
 });
+
+const resetBtnStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  borderRadius: '50%',
+  border: '1px solid var(--border-subtle)',
+  background: 'var(--surface-bg-muted)',
+  color: 'var(--accent-primary)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  cursor: 'pointer',
+};
 
 const exitBtnStyle: React.CSSProperties = {
   display: 'flex',
