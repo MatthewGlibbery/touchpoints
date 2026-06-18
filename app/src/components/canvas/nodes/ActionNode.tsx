@@ -47,7 +47,10 @@ export const ActionNode = memo(({ data }: NodeProps) => {
   const commentMode = useBlueprintStore((s) => s.commentMode);
   const overviewMode = useBlueprintStore((s) => s.overviewMode);
   const selectedNodeId = useBlueprintStore((s) => s.selectedNodeId);
+  const multiSelectedNodeIds = useBlueprintStore((s) => s.multiSelectedNodeIds);
+  const setMultiSelectedNodeIds = useBlueprintStore((s) => s.setMultiSelectedNodeIds);
   const selected = selectedNodeId === action.id;
+  const multiSelected = multiSelectedNodeIds.includes(action.id);
   const openThread = useCommentsStore((s) => s.openThread);
 
   const cardCenterPos = useCallback((): { x: number; y: number } | null => {
@@ -57,15 +60,31 @@ export const ActionNode = memo(({ data }: NodeProps) => {
     return { x: r.left + r.width / 2, y: r.bottom };
   }, []);
 
-  const handleCardClick = useCallback(() => {
+  const handleCardClick = useCallback((e: React.MouseEvent) => {
     if (presentMode) return;
     if (commentMode) {
       openThread({ type: 'action', id: action.id }, cardCenterPos());
       return;
     }
+    // Shift+click: toggle in multi-select without opening inspector
+    if (e.shiftKey) {
+      const current = useBlueprintStore.getState().multiSelectedNodeIds;
+      if (current.includes(action.id)) {
+        setMultiSelectedNodeIds(current.filter((id) => id !== action.id));
+      } else {
+        setMultiSelectedNodeIds([...current, action.id]);
+      }
+      // Close inspector if open
+      setSelectedNode(null);
+      return;
+    }
+    // Normal click: clear multi-select and open inspector
+    if (multiSelectedNodeIds.length > 0) {
+      setMultiSelectedNodeIds([]);
+    }
     setSelectedNode(action.id);
     animateToNode(action.id);
-  }, [presentMode, commentMode, openThread, action.id, cardCenterPos, setSelectedNode, animateToNode]);
+  }, [presentMode, commentMode, openThread, action.id, cardCenterPos, setSelectedNode, animateToNode, multiSelectedNodeIds, setMultiSelectedNodeIds]);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(action.label);
@@ -208,7 +227,8 @@ export const ActionNode = memo(({ data }: NodeProps) => {
     (canvasView === 'pain-points'   && painCount > 0) ||
     (canvasView === 'opportunities' && oppCount > 0)  ||
     (canvasView === 'questions'     && qCount > 0);
-  const dimmed = isFiltered && !isMatch;
+  const hasMultiSelect = multiSelectedNodeIds.length > 0;
+  const dimmed = (isFiltered && !isMatch) || (hasMultiSelect && !multiSelected);
   const highlighted = isFiltered && isMatch;
 
   const hColor = HIGHLIGHT_COLORS[canvasView] ?? '';
@@ -217,20 +237,26 @@ export const ActionNode = memo(({ data }: NodeProps) => {
 
   const borderColor = selected
     ? 'var(--accent-primary)'
+    : multiSelected
+    ? 'var(--accent-primary)'
     : highlighted
     ? hColor
     : 'var(--border-subtle)';
 
-  const borderWidth = selected || highlighted ? 2 : 1;
+  const borderWidth = selected || multiSelected || highlighted ? 2 : 1;
 
   const bgColor = selected
     ? `linear-gradient(rgba(59,130,246,0.12), rgba(59,130,246,0.12)), var(--surface-bg)`
+    : multiSelected
+    ? `linear-gradient(rgba(59,130,246,0.06), rgba(59,130,246,0.06)), var(--surface-bg)`
     : highlighted
     ? `linear-gradient(${hBg}, ${hBg}), var(--surface-bg)`
     : 'var(--surface-bg)';
 
   const shadow = selected
     ? `0 0 0 4px rgba(59,130,246,0.12), var(--shadow-md)`
+    : multiSelected
+    ? `0 0 0 3px rgba(59,130,246,0.08), var(--shadow-sm)`
     : highlighted
     ? `${hGlow}, var(--shadow-md)`
     : 'var(--shadow-sm)';

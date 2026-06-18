@@ -267,8 +267,9 @@ export function BlueprintCanvas() {
     setSelectedLaneSegment(null);
     setSelectedLaneId(null);
     setSelectedPhase(null);
+    setMultiSelectedNodeIds([]);
     clearOverviewCell();
-  }, [canvasView, setCanvasView, setSelectedNode, setSelectedEdge, setSelectedColumnKey, setSelectedLaneSegment, setSelectedLaneId, setSelectedPhase, clearOverviewCell]);
+  }, [canvasView, setCanvasView, setSelectedNode, setSelectedEdge, setSelectedColumnKey, setSelectedLaneSegment, setSelectedLaneId, setSelectedPhase, setMultiSelectedNodeIds, clearOverviewCell]);
 
   const displayNodes = useMemo(() => {
     const EDITING = ['emptyCell', 'columnInserter', 'columnOverlay', 'phaseBoundary', 'phaseAdder', 'actorAdder', 'timelineAdder', 'statusAdder'];
