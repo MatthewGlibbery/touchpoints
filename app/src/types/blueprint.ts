@@ -103,6 +103,8 @@ export type PresentationKeyframe = {
   selectedNodeId?: string | null;
   compareMode?: boolean;
   compareVersionIds?: [string | null, string | null];
+  overviewMode?: boolean;
+  multiSelectedNodeIds?: string[];
 };
 
 export type Presentation = {

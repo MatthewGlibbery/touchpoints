@@ -441,7 +441,7 @@ export function SlidePanel() {
 
   const handleAddSlide = () => {
     if (!activePresentation) return;
-    const { activeVersionId, canvasView, selectedNodeId, inspectorOpen, compareMode, compareVersionIds } =
+    const { activeVersionId, canvasView, selectedNodeId, inspectorOpen, compareMode, compareVersionIds, overviewMode, multiSelectedNodeIds } =
       useBlueprintStore.getState();
 
     const viewport = compareMode
@@ -455,6 +455,8 @@ export function SlidePanel() {
       selectedNodeId:    (!compareMode && inspectorOpen && selectedNodeId) ? selectedNodeId : undefined,
       compareMode:       compareMode || undefined,
       compareVersionIds: compareMode ? compareVersionIds : undefined,
+      overviewMode:      overviewMode || undefined,
+      multiSelectedNodeIds: multiSelectedNodeIds.length > 0 ? multiSelectedNodeIds : undefined,
     });
 
     requestAnimationFrame(() => {

@@ -39,7 +39,7 @@ export function BlueprintCanvas() {
   const isGuestView = useBlueprintStore((s) => s.isGuestView);
   const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
   const canvasView = useBlueprintStore((s) => s.canvasView);
-  const setCanvasView = useBlueprintStore((s) => s.setCanvasView);
+  // setCanvasView not used here — canvasView is changed via ViewRail only
   const actorDragOffset = useBlueprintStore((s) => s.actorDragOffset);
   const phaseDragOffset = useBlueprintStore((s) => s.phaseDragOffset);
   const draggingNodeId = useBlueprintStore((s) => s.draggingNodeId);
@@ -266,10 +266,7 @@ export function BlueprintCanvas() {
   );
 
   const onPaneClick = useCallback(() => {
-    if (canvasView !== 'edit') {
-      setCanvasView('edit');
-      return;
-    }
+    // Close any open panels, but do NOT reset canvasView — user stays in pain/opp/question mode
     setSelectedNode(null);
     setSelectedEdge(null);
     setSelectedColumnKey(null);
@@ -278,7 +275,7 @@ export function BlueprintCanvas() {
     setSelectedPhase(null);
     setMultiSelectedNodeIds([]);
     clearOverviewCell();
-  }, [canvasView, setCanvasView, setSelectedNode, setSelectedEdge, setSelectedColumnKey, setSelectedLaneSegment, setSelectedLaneId, setSelectedPhase, setMultiSelectedNodeIds, clearOverviewCell]);
+  }, [setSelectedNode, setSelectedEdge, setSelectedColumnKey, setSelectedLaneSegment, setSelectedLaneId, setSelectedPhase, setMultiSelectedNodeIds, clearOverviewCell]);
 
   const displayNodes = useMemo(() => {
     const EDITING = ['emptyCell', 'columnInserter', 'columnOverlay', 'phaseBoundary', 'phaseAdder', 'actorAdder', 'timelineAdder', 'statusAdder'];

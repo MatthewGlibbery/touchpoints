@@ -1786,6 +1786,8 @@ export const useBlueprintStore = create<AppState>()(
           edgeInspectorOpen: false,
           compareMode: kf.compareMode ?? false,
           compareVersionIds: kf.compareVersionIds ?? [null, null],
+          overviewMode: kf.overviewMode ?? false,
+          multiSelectedNodeIds: kf.multiSelectedNodeIds ?? [],
         };
 
         // Switch version if keyframe specifies one
