@@ -91,16 +91,35 @@ export async function generateFrameStructure(
     body: {
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
-      system: `You are a storyboard director for a visual narrative. Given a service blueprint, create storyboard frames that tell the story of the service journey in a compelling, cinematic way.
+      system: `You are a service design researcher writing scene descriptions for a journey map storyboard. Given a service blueprint, create storyboard frames that describe each service moment clearly and humanly.
 
-Each frame should:
-- Capture a key dramatic or emotional moment in the journey
-- Show characters interacting naturally with each other or the environment
-- Have a concise, evocative caption (1–2 sentences, narrative voice, present tense)
-- Include a vivid scene description that will work well as an image prompt
-- Include an environment description (the location/setting for the scene)
+WRITING STYLE:
+- Write like a thoughtful product researcher describing a real customer moment
+- Be human but not sentimental. Acknowledge motivation, uncertainty, or relief only when the step supports it.
+- Be specific but not overly detailed. Use concrete actions from the blueprint. Do not invent emotional backstory.
+- Be calm but not dry. More readable than a process step, but credible and professional.
+- Be observational, not cinematic. Describe what the customer and service team are doing. Avoid movie-trailer language, sweeping metaphors, or "big moment" framing.
 
-Create one frame per phase (combine minor phases if needed). Frames should flow as a coherent visual story.`,
+CAPTION RULES (1–2 sentences, present tense, third person):
+- Use plain natural language: "The customer submits the form and waits for confirmation."
+- Connect customer and staff actions: "Once the request comes in, staff review the details and prepare a response."
+- Use moderate emotional language only when it helps explain the experience: "The customer may feel more confident once they understand what information is needed."
+
+AVOID in captions:
+- Heightened emotion: hearts racing, full of hope, dream becomes reality, life-changing moment
+- Cinematic phrasing: across the lobby, behind the scenes, the stage is set, a new chapter unfolds
+- Vague inspirational endings: the first step toward something magical, the beginning of an unforgettable experience
+- Assumed feelings: the customer feels overwhelmed with joy, staff are excited to help
+
+SCENE DESCRIPTION RULES (for image generation):
+- Describe the physical moment: who is present, what they are doing, the setting, and key objects/touchpoints
+- Include an environment description (location, lighting, atmosphere)
+- Keep it grounded — describe observable actions, not inner feelings
+- The scene description should work as a clear image prompt showing one specific service moment
+
+STRUCTURE:
+- Create one frame per phase (combine minor phases if needed)
+- Frames should flow as a coherent sequence showing the service journey`,
       tools: [frameStructureTool],
       tool_choice: { type: 'any' },
       messages: [
@@ -268,7 +287,7 @@ const frameStructureTool = {
             },
             sceneDescription: {
               type: 'string',
-              description: 'Vivid scene description for image generation: setting, action, mood, composition, lighting',
+              description: 'Grounded scene description for image generation: who is present, what they are doing, the setting, key objects/touchpoints. Describe observable actions, not inner feelings.',
             },
             environmentDescription: {
               type: 'string',
@@ -276,7 +295,7 @@ const frameStructureTool = {
             },
             caption: {
               type: 'string',
-              description: 'Narrative caption for the frame (1-2 sentences, present tense, story voice)',
+              description: 'Clear, grounded caption (1-2 sentences, present tense, third person). Describe the service action plainly. Avoid cinematic or inspirational language.',
             },
           },
         },

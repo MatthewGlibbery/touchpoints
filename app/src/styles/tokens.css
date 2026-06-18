@@ -2,7 +2,7 @@
   color-scheme: light;
 
   --canvas-bg: #F5F6F8;
-  --canvas-grid: #DDE1E7;
+  --canvas-grid: #B8D4F0;
 
   --surface-bg: #FFFFFF;
   --surface-bg-muted: #F3F4F6;
@@ -30,6 +30,9 @@
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
   --shadow-md: 0 2px 8px rgba(0,0,0,0.08);
 
+  --phase-header-bg: #E8EAEE;
+  --phase-header-bg-hover: #D9DCE2;
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -51,7 +54,7 @@
   color-scheme: dark;
 
   --canvas-bg: #111318;
-  --canvas-grid: #1C2028;
+  --canvas-grid: #2A3444;
 
   --surface-bg: #181B22;
   --surface-bg-muted: #222631;
@@ -78,4 +81,7 @@
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.45);
+
+  --phase-header-bg: #252830;
+  --phase-header-bg-hover: #2F333D;
 }
