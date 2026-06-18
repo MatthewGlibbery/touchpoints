@@ -68,14 +68,26 @@ export const ActionNode = memo(({ data }: NodeProps) => {
     }
     // Shift+click: toggle in multi-select without opening inspector
     if (e.shiftKey) {
+      e.stopPropagation();
       const current = useBlueprintStore.getState().multiSelectedNodeIds;
+      const selectedId = useBlueprintStore.getState().selectedNodeId;
+      let next: string[];
       if (current.includes(action.id)) {
-        setMultiSelectedNodeIds(current.filter((id) => id !== action.id));
+        // Remove from multi-select
+        next = current.filter((id) => id !== action.id);
       } else {
-        setMultiSelectedNodeIds([...current, action.id]);
+        // Add to multi-select; also include the currently-inspected node if any
+        next = [...current];
+        if (selectedId && !next.includes(selectedId)) {
+          next.push(selectedId);
+        }
+        next.push(action.id);
       }
-      // Close inspector if open
-      setSelectedNode(null);
+      setMultiSelectedNodeIds(next);
+      // Close inspector so we're in pure multi-select mode
+      if (next.length >= 2) {
+        setSelectedNode(null);
+      }
       return;
     }
     // Normal click: clear multi-select and open inspector
@@ -227,7 +239,7 @@ export const ActionNode = memo(({ data }: NodeProps) => {
     (canvasView === 'pain-points'   && painCount > 0) ||
     (canvasView === 'opportunities' && oppCount > 0)  ||
     (canvasView === 'questions'     && qCount > 0);
-  const hasMultiSelect = multiSelectedNodeIds.length > 0;
+  const hasMultiSelect = multiSelectedNodeIds.length >= 2;
   const dimmed = (isFiltered && !isMatch) || (hasMultiSelect && !multiSelected);
   const highlighted = isFiltered && isMatch;
 

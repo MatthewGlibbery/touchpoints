@@ -245,12 +245,21 @@ export function BlueprintCanvas() {
     ({ nodes: changedNodes }: { nodes: Node[] }) => {
       const actionNodes = changedNodes.filter((n) => n.type === 'action');
       setSelectedActionNodes(actionNodes);
-      setMultiSelectedNodeIds(actionNodes.map((n) => n.id.replace('action-', '')));
-      if (actionNodes.length > 1) {
-        // Close inspectors when multi-selecting
+      // Only populate multiSelectedNodeIds when 2+ nodes are selected (lasso or shift+click).
+      // Single-node selection is handled by setSelectedNode (opens inspector).
+      if (actionNodes.length >= 2) {
+        setMultiSelectedNodeIds(actionNodes.map((n) => n.id.replace('action-', '')));
         setSelectedNode(null);
         setSelectedEdge(null);
         setSelectedPhase(null);
+      } else if (actionNodes.length <= 1) {
+        // Don't clear multiSelectedNodeIds here — shift+click manages it directly.
+        // Only clear if ReactFlow is telling us lasso deselected everything.
+        const current = useBlueprintStore.getState().multiSelectedNodeIds;
+        if (current.length > 0 && actionNodes.length === 0) {
+          setMultiSelectedNodeIds([]);
+        }
+        setSelectedActionNodes([]);
       }
     },
     [setSelectedNode, setSelectedEdge, setSelectedPhase, setMultiSelectedNodeIds]
