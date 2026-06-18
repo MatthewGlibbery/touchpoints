@@ -182,6 +182,32 @@ export type TimelineLane = {
   segments: LaneSegment[];     // segment label is the duration text e.g. "48 hours"
 };
 
+// ─── Frameworks (axis-based prioritisation) ──────────────────────────────────
+// Axes are reusable building blocks. Card positions are stored *per-axis* so
+// that when you plot cards on a single axis, those positions persist and are
+// reused when combining axes into 2D/3D frameworks.
+
+export type FrameworkAxis = {
+  id: string;
+  title: string;
+  lowLabel: string;            // e.g. "Low"
+  highLabel: string;           // e.g. "High"
+  /** Card positions on this axis, keyed by card id. Value is 0-9 snap position. */
+  cardPositions: Record<string, number>;
+};
+
+export type FrameworkCardPosition = {
+  /** Values keyed by axisId, each 0-9 representing the snap position */
+  axisValues: Record<string, number>;
+};
+
+export type Framework = {
+  id: string;
+  name: string;
+  axisIds: string[];                              // 2-3 axis references (combinations only)
+  mode: '2d' | '3d';
+};
+
 // ─── Comments / collaborators / notifications ────────────────────────────────
 // Stored in dedicated Supabase tables (see supabase/migrations/20260518_comments.sql).
 // NOT written into Blueprint.data JSONB. Loaded into a separate Zustand slice.
@@ -280,6 +306,8 @@ export type Blueprint = {
   storyboards?: Storyboard[];
   statusLanes?: StatusLane[];
   timelineLanes?: TimelineLane[];
+  frameworkAxes?: FrameworkAxis[];
+  frameworks?: Framework[];
   createdAt: string;
   updatedAt: string;
 };

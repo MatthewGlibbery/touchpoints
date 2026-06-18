@@ -27,6 +27,7 @@ export const OVERVIEW_CARD_HEIGHT = 56;  // fixed card height for overview mode 
 // one fixed-height row.
 export const TIMELINE_LANE_HEIGHT = 44;
 export const STATUS_LANE_HEIGHT = 56;
+export const PHASE_STATUS_GAP = 12;  // visual gap between phase header row and first status row
 /** @deprecated use H_CELL_PAD / V_CELL_PAD */
 export const CELL_PADDING = H_CELL_PAD;
 
@@ -132,8 +133,8 @@ export function computeLaneOffsets(blueprint: Blueprint, isOverview: boolean) {
     timelineAdderHeight,
     statusAdderHeight,
     phaseHeaderY: timelineRegionHeight,
-    statusRegionY: timelineRegionHeight + PHASE_HEADER_HEIGHT,
-    actorRegionY: timelineRegionHeight + PHASE_HEADER_HEIGHT + statusRegionHeight,
+    statusRegionY: timelineRegionHeight + PHASE_HEADER_HEIGHT + PHASE_STATUS_GAP,
+    actorRegionY: timelineRegionHeight + PHASE_HEADER_HEIGHT + PHASE_STATUS_GAP + statusRegionHeight,
   };
 }
 

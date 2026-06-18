@@ -1,6 +1,6 @@
 import { useCallback, useRef, useEffect, useState, useMemo } from 'react';
 import {
-  ReactFlow, MiniMap, ConnectionMode, ConnectionLineType,
+  ReactFlow, ConnectionMode, ConnectionLineType,
   applyNodeChanges, useStore,
   type Connection, type Edge, type ReactFlowInstance, type Node, type NodeChange,
 } from '@xyflow/react';
@@ -368,24 +368,7 @@ export function BlueprintCanvas() {
             onDelete={() => setConfirmMultiDelete(true)}
           />
         )}
-        <MiniMap
-          style={{
-            background: theme === 'dark' ? '#181B22' : '#FFFFFF',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-md)',
-          }}
-          maskColor={theme === 'dark' ? 'rgba(0,0,0,0.55)' : 'rgba(200,210,220,0.5)'}
-          nodeStrokeWidth={0}
-          zoomable
-          pannable
-          nodeColor={(node) => {
-            if (node.type === 'action') return (node.data as any).actorColor ?? '#3B82F6';
-            if (node.type === 'phaseHeader') return theme === 'dark' ? '#2B303B' : '#E5E7EB';
-            if (node.type === 'actorLabel') return theme === 'dark' ? '#222631' : '#F3F4F6';
-            if (node.type === 'swimlane') return theme === 'dark' ? '#181B22' : '#FFFFFF';
-            return theme === 'dark' ? '#181B22' : '#FFFFFF';
-          }}
-        />
+        {/* TODO: Revisit minimap — hidden for now to reduce visual noise */}
       </ReactFlow>
       {confirmMultiDelete && (
         <ConfirmDeleteModal

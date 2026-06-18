@@ -99,18 +99,28 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
       style={{
         width,
         height: PHASE_HEADER_HEIGHT,
-        background: phase.conditional ? 'rgba(245,158,11,0.05)' : 'var(--surface-bg)',
-        borderBottom: phase.conditional ? '2px dashed rgba(245,158,11,0.5)' : '2px solid var(--border-strong)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '0 20px',
-        userSelect: 'none',
+        padding: 6,
+        boxSizing: 'border-box',
         position: 'relative',
         cursor: dragging ? 'grabbing' : (editing ? 'text' : 'pointer'),
+        userSelect: 'none',
       }}
     >
-      {/* Drag grip — visual affordance */}
+      {/* Inner colored area */}
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          background: phase.conditional ? 'rgba(245,158,11,0.08)' : 'var(--phase-header-bg)',
+          borderRadius: 'var(--radius-md)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '0 20px',
+          position: 'relative',
+        }}
+      >
+      {/* Drag grip — circle affordance */}
       <div
         style={{
           position: 'absolute',
@@ -123,12 +133,15 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
           transition: 'opacity var(--transition-fast)',
           display: 'flex',
           alignItems: 'center',
-          padding: 4,
-          borderRadius: 4,
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          borderRadius: '50%',
+          background: 'var(--surface-bg-muted)',
           pointerEvents: 'none',
         }}
       >
-        <GripHorizontal size={14} />
+        <GripHorizontal size={12} />
       </div>
 
       {phase.conditional && (
@@ -140,8 +153,8 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
           alignItems: 'center',
           gap: 3,
           padding: '1px 5px',
-          background: 'rgba(245,158,11,0.12)',
-          border: '1px solid rgba(245,158,11,0.3)',
+          background: 'var(--surface-bg)',
+          border: '1px solid rgba(245,158,11,0.4)',
           borderRadius: 'var(--radius-pill)',
           fontSize: 9,
           fontWeight: 700,
@@ -210,6 +223,7 @@ export const PhaseHeaderNode = memo(({ data }: NodeProps) => {
         getAnchorPos={headerCenterPos}
         style={{ position: 'absolute', right: 8, top: -10, zIndex: 5 }}
       />
+      </div>
     </div>
   );
 });

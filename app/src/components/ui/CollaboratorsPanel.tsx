@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Users, Mail, Clock, Check, Trash2, Link, Copy, X, Share2 } from 'lucide-react';
+import { Users, Mail, Clock, Check, Trash2, Link, Copy, X, Share2, FileDown } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { useCommentsStore } from '../../store/comments.store';
 import { getShareToken, createShareToken, deleteShareToken, saveBlueprintCloud } from '../../lib/storage';
+import { exportBlueprintForAI } from '../../lib/exportAI';
+import type { Blueprint } from '../../types/blueprint';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -97,8 +99,8 @@ export function CollaboratorsPanel() {
           boxShadow: 'var(--shadow-sm)',
         }}
       >
-        <Users size={12} />
-        People
+        <Share2 size={12} />
+        Share
         {collaborators.length > 0 && (
           <span
             style={{
@@ -262,6 +264,9 @@ export function CollaboratorsPanel() {
 
             {/* Share link section */}
             <ShareLinkSection blueprintId={blueprint.id} />
+
+            {/* Export for AI */}
+            <ExportAISection blueprint={blueprint} />
           </div>
         </div>
       )}
@@ -462,6 +467,70 @@ function ShareLinkSection({ blueprintId }: { blueprintId: string }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ExportAISection({ blueprint }: { blueprint: Blueprint }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleExport() {
+    const md = exportBlueprintForAI(blueprint);
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${blueprint.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_ai.md`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function handleCopy() {
+    const md = exportBlueprintForAI(blueprint);
+    navigator.clipboard.writeText(md).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border-subtle)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <FileDown size={12} color="var(--text-muted)" />
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Export for AI</span>
+      </div>
+      <p style={{ margin: '0 0 8px', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+        Download a compact .md file structured for AI tools — includes all phases, actions, pains, opportunities, and axis positions.
+      </p>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          onClick={handleExport}
+          style={{
+            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+            padding: '7px', fontSize: 11, fontWeight: 600,
+            color: 'var(--accent-primary)',
+            background: 'var(--accent-primary-soft)',
+            border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+          }}
+        >
+          <FileDown size={11} />
+          Download .md
+        </button>
+        <button
+          onClick={handleCopy}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+            padding: '7px 10px', fontSize: 11, fontWeight: 500,
+            color: copied ? 'var(--accent-success)' : 'var(--text-secondary)',
+            background: 'transparent',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)', cursor: 'pointer',
+          }}
+        >
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
     </div>
   );
 }

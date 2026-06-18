@@ -1,4 +1,4 @@
-import { Map, Users, Film } from 'lucide-react';
+import { Map, Users, Film, Grid3X3 } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 
 export function ModeBar() {
@@ -6,12 +6,15 @@ export function ModeBar() {
   const presentationEditMode  = useBlueprintStore((s) => s.presentationEditMode);
   const storyboardMode        = useBlueprintStore((s) => s.storyboardMode);
   const setStoryboardMode     = useBlueprintStore((s) => s.setStoryboardMode);
+  const frameworkMode         = useBlueprintStore((s) => s.frameworkMode);
+  const setFrameworkMode      = useBlueprintStore((s) => s.setFrameworkMode);
 
   const inPresentationContext = presentMode || presentationEditMode;
 
   const exitToEdit = () => {
     useBlueprintStore.setState({ presentMode: false, presentationEditMode: false });
     setStoryboardMode(false);
+    setFrameworkMode(false);
   };
 
   const pillBase: React.CSSProperties = {
@@ -26,7 +29,7 @@ export function ModeBar() {
     gap: 5,
   };
 
-  const isBlueprint = !inPresentationContext && !storyboardMode;
+  const isBlueprint = !inPresentationContext && !storyboardMode && !frameworkMode;
 
   return (
     <div
@@ -88,6 +91,20 @@ export function ModeBar() {
       >
         <Film size={12} />
         Journey Maps
+      </button>
+
+      {/* Frameworks */}
+      <button
+        onClick={() => (frameworkMode ? exitToEdit() : setFrameworkMode(true))}
+        style={{
+          ...pillBase,
+          fontWeight: frameworkMode ? 600 : 400,
+          color: frameworkMode ? 'var(--text-primary)' : 'var(--text-secondary)',
+          background: frameworkMode ? 'var(--surface-bg-muted)' : 'transparent',
+        }}
+      >
+        <Grid3X3 size={12} />
+        Frameworks
       </button>
     </div>
   );

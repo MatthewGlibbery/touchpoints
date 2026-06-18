@@ -5,6 +5,7 @@ import { OnboardingOverlay } from './components/onboarding/OnboardingOverlay';
 import { BlueprintCanvas } from './components/canvas/BlueprintCanvas';
 import { SplitCanvas } from './components/canvas/SplitCanvas';
 import { JourneyMapView } from './components/storyboard/StoryboardView';
+import { FrameworksView } from './components/frameworks/FrameworksView';
 import { ProjectBar } from './components/ui/ProjectBar';
 import { ModeBar } from './components/ui/ModeBar';
 import { ViewRail, ViewPanel_ } from './components/ui/ViewRail';
@@ -20,7 +21,6 @@ import { OverviewInspector } from './components/ui/OverviewInspector';
 import { CommentThread } from './components/ui/CommentThread';
 import { CommentFilterBar } from './components/ui/CommentFilterBar';
 import { DetachedThreadsModal } from './components/ui/DetachedThreadsModal';
-import { Sun, Moon } from 'lucide-react';
 import { GuestNamePrompt } from './components/auth/GuestNamePrompt';
 
 export default function App() {
@@ -30,10 +30,10 @@ export default function App() {
   const presentationEditMode = useBlueprintStore((s) => s.presentationEditMode);
   const compareMode          = useBlueprintStore((s) => s.compareMode);
   const storyboardMode       = useBlueprintStore((s) => s.storyboardMode);
+  const frameworkMode        = useBlueprintStore((s) => s.frameworkMode);
   const inspectorOpen        = useBlueprintStore((s) => s.inspectorOpen);
   const overviewMode         = useBlueprintStore((s) => s.overviewMode);
   const selectedOverviewCell = useBlueprintStore((s) => s.selectedOverviewCell);
-  const toggleTheme          = useBlueprintStore((s) => s.toggleTheme);
   const lightboxUrl          = useBlueprintStore((s) => s.lightboxUrl);
   const setLightboxUrl       = useBlueprintStore((s) => s.setLightboxUrl);
   const isGuestView          = useBlueprintStore((s) => s.isGuestView);
@@ -159,7 +159,9 @@ export default function App() {
       {mode === 'auth' && <AuthScreen />}
 
       {/* ── Full-screen canvas layer ── */}
-      {inCanvas && storyboardMode
+      {inCanvas && frameworkMode
+        ? <FrameworksView />
+        : inCanvas && storyboardMode
         ? <JourneyMapView />
         : (inCanvas && compareMode) ? <SplitCanvas /> : <BlueprintCanvas />
       }
@@ -169,7 +171,7 @@ export default function App() {
       {/* ── Guest name prompt (shown once if can comment and no name yet) ── */}
       {isGuestView && guestCanComment && !guestName && <GuestNamePrompt />}
 
-      {inCanvas && !storyboardMode && (
+      {inCanvas && !storyboardMode && !frameworkMode && (
         <>
           {/* ── Standard edit UI — hidden in present and compare modes ── */}
           {!presentMode && !compareMode && (
@@ -214,31 +216,6 @@ export default function App() {
           {presentMode && <PresentationControls />}
         </>
       )}
-
-      {/* ── Theme toggle — always visible ── */}
-      <button
-        onClick={toggleTheme}
-        title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-        style={{
-          position: 'fixed',
-          bottom: 16,
-          left: 16,
-          zIndex: 50,
-          width: 32,
-          height: 32,
-          borderRadius: '50%',
-          border: '1px solid var(--border-strong)',
-          background: 'var(--surface-bg)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          color: 'var(--text-secondary)',
-          boxShadow: 'var(--shadow-md)',
-        }}
-      >
-        {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-      </button>
 
       {/* ── Comment thread popover (mode-agnostic) ── */}
       <CommentThread />

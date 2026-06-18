@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { LogOut } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
-import { NotificationsBell } from './NotificationsBell';
 import { CollaboratorsPanel } from './CollaboratorsPanel';
 
 export function UserMenu() {
@@ -28,22 +27,16 @@ export function UserMenu() {
 
   return (
     <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 50, display: 'flex', alignItems: 'center', gap: 8 }}>
-      {/* Collaborators + Share (existing component, renders its own pill) */}
-      <CollaboratorsPanel />
-
-      {/* Notifications bell (existing component) */}
-      <NotificationsBell />
-
       {/* Avatar circle */}
       <div ref={ref} style={{ position: 'relative' }}>
         <button
           onClick={() => setOpen(v => !v)}
           style={{
-            width: 36,
-            height: 36,
+            width: 30,
+            height: 30,
             borderRadius: '50%',
             background: 'var(--surface-bg)',
-            border: '2px solid var(--accent-primary)',
+            border: '1.5px solid var(--accent-primary)',
             boxShadow: 'var(--shadow-sm)',
             display: 'flex',
             alignItems: 'center',
@@ -51,7 +44,7 @@ export function UserMenu() {
             cursor: 'pointer',
           }}
         >
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-primary)', lineHeight: 1 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-primary)', lineHeight: 1 }}>
             {initials}
           </span>
         </button>
@@ -106,6 +99,9 @@ export function UserMenu() {
           </div>
         )}
       </div>
+
+      {/* Share button (far right, in the corner) */}
+      <CollaboratorsPanel />
     </div>
   );
 }

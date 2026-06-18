@@ -78,29 +78,26 @@ export const PhaseBoundaryNode = memo(({ data }: NodeProps) => {
       >
         <div
           style={{
-            width: visible ? 22 : 6,
-            height: visible ? 22 : 26,
-            borderRadius: visible ? '50%' : 3,
-            background: visible ? 'var(--accent-primary)' : 'var(--border-strong)',
-            opacity: visible ? 1 : 0.5,
+            width: 24,
+            height: 24,
+            borderRadius: '50%',
+            background: visible ? 'var(--accent-primary)' : 'transparent',
+            opacity: visible ? 1 : 0,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            transition: 'background var(--transition-fast), opacity var(--transition-fast), width var(--transition-fast), height var(--transition-fast), border-radius var(--transition-fast)',
+            transition: 'background var(--transition-fast), opacity var(--transition-fast)',
           }}
         >
           {visible && <MoveHorizontal size={12} color="#fff" />}
         </div>
       </div>
 
-      {/* Body zone — visual divider only, no interaction */}
+      {/* Body zone — hidden; gap between phases provides visual separation */}
       <div
         style={{
-          width: visible ? 2 : 1,
+          width: 0,
           flex: 1,
-          background: visible ? 'var(--accent-primary)' : 'var(--border-strong)',
-          opacity: visible ? 0.6 : 0.55,
-          transition: 'background var(--transition-fast), opacity var(--transition-fast), width var(--transition-fast)',
           pointerEvents: 'none',
         }}
       />

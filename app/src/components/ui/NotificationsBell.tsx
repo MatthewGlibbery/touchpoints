@@ -161,7 +161,7 @@ export function NotificationsBell() {
           style={{
             position: 'absolute',
             top: 'calc(100% + 6px)',
-            right: 0,
+            left: 0,
             width: 340,
             maxHeight: 480,
             background: 'var(--surface-bg)',

@@ -9,7 +9,7 @@ import { useCommentsStore, commentCountForAnchor } from '../../store/comments.st
 import { uploadActionMedia, mediaTypeFromFile } from '../../lib/upload';
 import { getBlueprintForVersion } from '../../lib/layout';
 
-type Tab = 'details' | 'pains' | 'opportunities' | 'questions' | 'comments';
+type Tab = 'step' | 'pains' | 'opportunities' | 'questions' | 'comments';
 const ACTOR_ICONS = [User, Globe, Building2, Users];
 
 export function NodeInspector() {
@@ -49,7 +49,7 @@ export function NodeInspector() {
   // also flips the UI to guest variants — commentMode keeps owner UI but disables edits.
   const editLocked = isGuestView || commentMode || isCollaboratorView;
 
-  const [activeTab, setActiveTab] = useState<Tab>('details');
+  const [activeTab, setActiveTab] = useState<Tab>('step');
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const [labelDraft, setLabelDraft] = useState('');
@@ -93,7 +93,7 @@ export function NodeInspector() {
     }
     // Apply a requested tab (from badge click), or default to details
     const requested = useBlueprintStore.getState().inspectorRequestedTab;
-    setActiveTab((requested as Tab) ?? 'details');
+    setActiveTab((requested as Tab) ?? 'step');
     if (requested) clearInspectorRequestedTab();
     setGuestDraft(null);
   }, [action?.id]);
@@ -116,7 +116,7 @@ export function NodeInspector() {
   const commentCount = action ? commentCountForAnchor(commentsList, { type: 'action', id: action.id }) : 0;
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
-    { id: 'details', label: 'Details' },
+    { id: 'step', label: 'Step' },
     { id: 'pains', label: 'Pains', count: painPoints.length || undefined },
     { id: 'opportunities', label: 'Opps', count: opportunities.length || undefined },
     { id: 'questions', label: 'Questions', count: questions.length || undefined },
@@ -164,46 +164,24 @@ export function NodeInspector() {
       {/* Tab content */}
       <div style={{ overflowY: 'auto', flexGrow: 1, padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-        {/* Details */}
-        {activeTab === 'details' && (
+        {/* Step */}
+        {activeTab === 'step' && (
           <>
-            <FieldBlock label="Step name">
+            <FieldBlock label="Title">
               <input value={labelDraft} onChange={(e) => !editLocked && setLabelDraft(e.target.value)}
                 onBlur={() => { if (editLocked) return; const v = labelDraft.trim(); if (v && v !== action.label) updateAction(action.id, { label: v }); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                 readOnly={editLocked}
                 style={{ ...inputStyle, cursor: editLocked ? 'default' : undefined }} />
             </FieldBlock>
-            <FieldBlock label="What this step is responsible for">
+            <FieldBlock label="Details">
               <textarea value={detailDraft} onChange={(e) => !editLocked && setDetailDraft(e.target.value)}
                 onBlur={() => { if (editLocked) return; const v = detailDraft.trim(); if (v !== (action.labelDetailed ?? '')) updateAction(action.id, { labelDetailed: v || undefined }); }}
                 readOnly={editLocked}
                 rows={4} style={{ ...inputStyle, resize: editLocked ? 'none' : 'vertical', lineHeight: 1.6, cursor: editLocked ? 'default' : undefined }} />
             </FieldBlock>
 
-            {/* Decision point tag */}
-            <FieldBlock label="Tags">
-              <DecisionPointToggle
-                active={(action.tags ?? []).includes('decision-point')}
-                onToggle={() => {
-                  const tags = action.tags ?? [];
-                  const next = tags.includes('decision-point')
-                    ? tags.filter((t) => t !== 'decision-point')
-                    : [...tags, 'decision-point'];
-                  updateAction(action.id, { tags: next });
-                }}
-              />
-            </FieldBlock>
-
-            {/* Touchpoints */}
-            <FieldBlock label="Touchpoints">
-              <TouchpointsSection
-                allTags={blueprint?.touchpointTags ?? []}
-                selectedTags={action.touchpointLabels ?? []}
-                onToggle={(tag) => toggleActionTouchpointLabel(action.id, tag)}
-                onAddNew={(tag) => { addTouchpointTag(tag); toggleActionTouchpointLabel(action.id, tag); }}
-              />
-            </FieldBlock>
+            {/* TODO: Bring back Tags and Touchpoints sections in a future iteration */}
 
             {/* Media */}
             <FieldBlock label="Media">
@@ -288,8 +266,8 @@ export function NodeInspector() {
 
       </div>
 
-      {/* Delete step — only on Details tab, not in guest view or comment mode */}
-      {activeTab === 'details' && !editLocked && <div style={{ padding: '0 18px 16px', flexShrink: 0 }}>
+      {/* Delete step — only on Step tab, not in guest view or comment mode */}
+      {activeTab === 'step' && !editLocked && <div style={{ padding: '0 18px 16px', flexShrink: 0 }}>
         <div style={{ height: 1, background: 'var(--border-subtle)', marginBottom: 12 }} />
         <button
           onClick={() => setConfirmDelete(true)}
@@ -865,4 +843,5 @@ function MediaSection({
     </div>
   );
 }
+
 

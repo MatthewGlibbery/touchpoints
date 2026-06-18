@@ -626,9 +626,9 @@ export const StatusSegmentNode = memo(({ data }: NodeProps) => {
         style={{
           width: width - 12,
           height: height - 12,
-          background: 'var(--surface-bg)',
+          background: `${color}20`,
           border: `1.5px solid ${color}`,
-          borderRadius: 'var(--radius-lg)',
+          borderRadius: 'var(--radius-md)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -664,7 +664,7 @@ export const StatusSegmentNode = memo(({ data }: NodeProps) => {
               background: 'transparent',
               fontSize: 13,
               fontWeight: 600,
-              color: 'var(--text-primary)',
+              color,
               textAlign: 'center',
             }}
           />
@@ -672,7 +672,7 @@ export const StatusSegmentNode = memo(({ data }: NodeProps) => {
           <span style={{
             fontSize: 13,
             fontWeight: 600,
-            color: 'var(--text-primary)',
+            color,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
