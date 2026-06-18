@@ -74,7 +74,7 @@ function CardNode3D({
   position: [number, number, number];
   onDragEnd: (cardId: string, pos: THREE.Vector3) => void;
 }) {
-  const meshRef = useRef<THREE.Mesh>(null);
+  const meshRef = useRef<THREE.Group>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [hovered, setHovered] = useState(false);
   const { camera, raycaster } = useThree();

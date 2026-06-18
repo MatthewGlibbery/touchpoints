@@ -27,8 +27,9 @@ export function NodeInspector() {
   const addQuestion = useBlueprintStore((s) => s.addQuestion);
   const updateQuestion = useBlueprintStore((s) => s.updateQuestion);
   const removeQuestion = useBlueprintStore((s) => s.removeQuestion);
-  const addTouchpointTag = useBlueprintStore((s) => s.addTouchpointTag);
-  const toggleActionTouchpointLabel = useBlueprintStore((s) => s.toggleActionTouchpointLabel);
+  // TODO: re-enable when Tags/Touchpoints sections are restored
+  // const addTouchpointTag = useBlueprintStore((s) => s.addTouchpointTag);
+  // const toggleActionTouchpointLabel = useBlueprintStore((s) => s.toggleActionTouchpointLabel);
   const removeAction = useBlueprintStore((s) => s.removeAction);
   const setLightboxUrl = useBlueprintStore((s) => s.setLightboxUrl);
   const setSelectedNode = useBlueprintStore((s) => s.setSelectedNode);
@@ -530,7 +531,9 @@ function QuestionTypePicker({ value, onChange }: { value: Question['type']; onCh
   );
 }
 
-function DecisionPointToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+// TODO: re-enable when Tags section is restored
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function DecisionPointToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
   return (
     <button
       onClick={onToggle}
@@ -555,7 +558,9 @@ function DecisionPointToggle({ active, onToggle }: { active: boolean; onToggle: 
   );
 }
 
-function TouchpointsSection({
+// TODO: re-enable when Touchpoints section is restored
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function TouchpointsSection({
   allTags,
   selectedTags,
   onToggle,

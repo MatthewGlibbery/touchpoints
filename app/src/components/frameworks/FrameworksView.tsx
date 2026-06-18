@@ -1,7 +1,7 @@
 import { useState, useMemo, lazy, Suspense } from 'react';
 import {
   ArrowLeft, Plus, Settings2, ChevronDown, Trash2, X,
-  Minus, Grid3X3, Box,
+  Minus, Grid3X3,
 } from 'lucide-react';
 import { useBlueprintStore } from '../../store/blueprint.store';
 import { AxisConfigurator } from './AxisConfigurator';
