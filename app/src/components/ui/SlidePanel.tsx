@@ -450,7 +450,7 @@ export function SlidePanel() {
 
     addKeyframe(activePresentation.id, {
       viewport,
-      versionId:         compareMode ? undefined : (activeVersionId ?? undefined),
+      versionId:         compareMode ? null : (activeVersionId ?? null),
       canvasView:        (!compareMode && canvasView !== 'edit') ? canvasView : undefined,
       selectedNodeId:    (!compareMode && inspectorOpen && selectedNodeId) ? selectedNodeId : undefined,
       compareMode:       compareMode || undefined,

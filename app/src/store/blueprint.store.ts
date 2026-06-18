@@ -1790,8 +1790,8 @@ export const useBlueprintStore = create<AppState>()(
           multiSelectedNodeIds: kf.multiSelectedNodeIds ?? [],
         };
 
-        // Switch version if keyframe specifies one
-        const targetVersionId = kf.versionId !== undefined ? kf.versionId : activeVersionId;
+        // Switch version if keyframe specifies one (null = base version, undefined = base version)
+        const targetVersionId = kf.versionId ?? null;
         if (targetVersionId !== activeVersionId) {
           const effectiveBp = getBlueprintForVersion(blueprint, targetVersionId);
           const { nodes, edges } = blueprintToFlow(effectiveBp);
@@ -1800,7 +1800,7 @@ export const useBlueprintStore = create<AppState>()(
           updates.blueprint = newBp as Blueprint;
           updates.rfNodes = nodes;
           updates.rfEdges = edges;
-          updates.activeVersionId = targetVersionId ?? null;
+          updates.activeVersionId = targetVersionId;
         }
 
         set(updates as Partial<AppState>);
