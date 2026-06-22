@@ -116,6 +116,7 @@ export type Presentation = {
 export type BlueprintVersion = {
   id: string;
   name: string;
+  actors?: Actor[];
   actions: Action[];
   painPoints: PainPoint[];
   opportunities: Opportunity[];

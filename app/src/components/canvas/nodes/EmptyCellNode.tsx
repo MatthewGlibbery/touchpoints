@@ -10,7 +10,7 @@ export const EmptyCellNode = memo(({ data }: NodeProps) => {
   const { actorId, phaseId, order, actorColor } = data as EmptyCellData;
   const addAction = useBlueprintStore((s) => s.addAction);
   const dragTarget = useBlueprintStore((s) => s.dragTarget);
-  const blueprint = useBlueprintStore((s) => s.blueprint);
+  const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
   const [hovered, setHovered] = useState(false);
 
   const isDragTarget =
@@ -18,7 +18,7 @@ export const EmptyCellNode = memo(({ data }: NodeProps) => {
     dragTarget?.phaseId === phaseId &&
     dragTarget?.order === order;
 
-  const actor = blueprint?.actors.find((a) => a.id === actorId);
+  const actor = effectiveActors.find((a) => a.id === actorId);
   const showDash = hovered || isDragTarget;
 
   return (

@@ -12,6 +12,7 @@ const ACTOR_ICONS = [User, Globe, Building2, Users];
 
 export function PhaseInspector() {
   const blueprint = useBlueprintStore((s) => s.blueprint);
+  const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
   const selectedPhaseId = useBlueprintStore((s) => s.selectedPhaseId);
   const phaseInspectorOpen = useBlueprintStore((s) => s.phaseInspectorOpen);
   const setSelectedPhase = useBlueprintStore((s) => s.setSelectedPhase);
@@ -94,7 +95,7 @@ export function PhaseInspector() {
     setGenerating(true);
     try {
       const actorNames = [...new Set(
-        phaseActions.map((a) => blueprint.actors.find((ac) => ac.id === a.actorId)?.name ?? 'Unknown')
+        phaseActions.map((a) => effectiveActors.find((ac) => ac.id === a.actorId)?.name ?? 'Unknown')
       )].join(', ');
 
       const stepLabels = phaseActions.map((a) => `- ${a.label}`).join('\n');
@@ -303,7 +304,7 @@ Write a concise 1-2 sentence description of what this phase of the service journ
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {colActions.map((action) => {
-                        const actor = blueprint?.actors.find((a) => a.id === action.actorId);
+                        const actor = effectiveActors.find((a) => a.id === action.actorId);
                         const ActorIcon = ACTOR_ICONS[(actor?.order ?? 0) % ACTOR_ICONS.length] ?? Activity;
                         return (
                           <div

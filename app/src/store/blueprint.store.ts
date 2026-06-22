@@ -19,6 +19,7 @@ type PhaseDragOffset = { phaseId: string; offsetX: number };
 type Theme = 'light' | 'dark';
 
 type ContentData = {
+  actors?: Actor[];
   actions?: Action[];
   painPoints?: PainPoint[];
   opportunities?: Opportunity[];
@@ -49,6 +50,7 @@ type AppState = {
   blueprint: Blueprint | null;
   rfNodes: Node[];
   rfEdges: Edge[];
+  effectiveActors: Actor[];
   selectedNodeId: string | null;
   inspectorOpen: boolean;
   inspectorRequestedTab: string | null;
@@ -397,10 +399,11 @@ export const useBlueprintStore = create<AppState>()(
 
     // ─── Version-aware helpers ──────────────────────────────────────────────
     // Read effective content (from active version or base)
-    const vRead = (): { actions: Action[]; painPoints: PainPoint[]; opportunities: Opportunity[]; questions: Question[] } => {
+    const vRead = (): { actors: Actor[]; actions: Action[]; painPoints: PainPoint[]; opportunities: Opportunity[]; questions: Question[] } => {
       const { blueprint, activeVersionId } = get();
-      if (!blueprint) return { actions: [], painPoints: [], opportunities: [], questions: [] };
+      if (!blueprint) return { actors: [], actions: [], painPoints: [], opportunities: [], questions: [] };
       if (!activeVersionId) return {
+        actors: blueprint.actors,
         actions: blueprint.actions,
         painPoints: blueprint.painPoints,
         opportunities: blueprint.opportunities,
@@ -408,18 +411,24 @@ export const useBlueprintStore = create<AppState>()(
       };
       const v = blueprint.versions?.find((v) => v.id === activeVersionId);
       if (!v) return {
+        actors: blueprint.actors,
         actions: blueprint.actions,
         painPoints: blueprint.painPoints,
         opportunities: blueprint.opportunities,
         questions: blueprint.questions ?? [],
       };
-      return { actions: v.actions, painPoints: v.painPoints, opportunities: v.opportunities, questions: v.questions };
+      return { actors: v.actors ?? blueprint.actors, actions: v.actions, painPoints: v.painPoints, opportunities: v.opportunities, questions: v.questions };
     };
 
     // Write content to active version or base
     const vWrite = (bp: Blueprint, data: ContentData): Blueprint => {
       const { activeVersionId } = get();
-      if (!activeVersionId) return { ...bp, ...data };
+      if (!activeVersionId) {
+        const { actors, ...rest } = data;
+        const updated = { ...bp, ...rest };
+        if (actors) updated.actors = actors;
+        return updated;
+      }
       return {
         ...bp,
         versions: (bp.versions ?? []).map((v) =>
@@ -512,7 +521,7 @@ export const useBlueprintStore = create<AppState>()(
       const displayBp = overviewMode ? buildOverviewBlueprint(effectiveBp) : effectiveBp;
       const { nodes, edges } = blueprintToFlow(displayBp, { overviewMode });
       saveBlueprint(bp);
-      set({ blueprint: bp, rfNodes: nodes, rfEdges: edges });
+      set({ blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
     };
 
     return {
@@ -533,6 +542,7 @@ export const useBlueprintStore = create<AppState>()(
       blueprint: null,
       rfNodes: [],
       rfEdges: [],
+      effectiveActors: [],
       selectedNodeId: null,
       inspectorOpen: false,
       inspectorRequestedTab: null,
@@ -609,7 +619,7 @@ export const useBlueprintStore = create<AppState>()(
         const effectiveBp = getBlueprintForVersion(blueprint, versionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         saveBlueprint(blueprint);
-        set({ blueprint, rfNodes: nodes, rfEdges: edges, mode: 'canvas', activeVersionId: versionId, overviewMode: false, blueprintRowId: null, commentMode: false, isCollaboratorView: false });
+        set({ blueprint, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, mode: 'canvas', activeVersionId: versionId, overviewMode: false, blueprintRowId: null, commentMode: false, isCollaboratorView: false });
         loadCommentsForBlueprint(blueprint.id);
       },
 
@@ -636,7 +646,7 @@ export const useBlueprintStore = create<AppState>()(
         const { nodes, edges } = blueprintToFlow(bp);
         saveBlueprint(bp);
         set({
-          blueprint: bp, rfNodes: nodes, rfEdges: edges, mode: 'canvas', activeVersionId: null,
+          blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: bp.actors, mode: 'canvas', activeVersionId: null,
           selectedNodeId: null, inspectorOpen: false,
           selectedActorId: null, actorPanelOpen: false,
           selectedPhaseId: null, phaseInspectorOpen: false,
@@ -713,7 +723,7 @@ export const useBlueprintStore = create<AppState>()(
         useCommentsStore.getState().clear();
         set({ mode: 'auth', userId: null, userEmail: null, displayName: null,
           pendingNameCapture: false, pendingMigration: null, blueprint: null,
-          rfNodes: [], rfEdges: [], activeVersionId: null, blueprintRowId: null, commentMode: false,
+          rfNodes: [], rfEdges: [], effectiveActors: [], activeVersionId: null, blueprintRowId: null, commentMode: false,
           isCollaboratorView: false });
       },
 
@@ -745,7 +755,7 @@ export const useBlueprintStore = create<AppState>()(
           const storedName = sessionStorage.getItem('guest-name') || null;
           const guestRowId = (data.blueprintRowId ?? null) as string | null;
           set({
-            blueprint: bp, rfNodes: nodes, rfEdges: edges, mode: 'canvas',
+            blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: bp.actors, mode: 'canvas',
             isGuestView: true, shareToken: token,
             guestCanComment: data.canComment ?? true,
             guestShareId: data.shareId ?? null,
@@ -793,7 +803,7 @@ export const useBlueprintStore = create<AppState>()(
         };
         const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
         if (guestShareId && guestBlueprintRowId) {
           try {
             await supabase.from('guest_comments').insert({
@@ -818,7 +828,7 @@ export const useBlueprintStore = create<AppState>()(
         };
         const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
         if (guestShareId && guestBlueprintRowId) {
           try {
             await supabase.from('guest_comments').insert({
@@ -843,7 +853,7 @@ export const useBlueprintStore = create<AppState>()(
         };
         const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
         if (guestShareId && guestBlueprintRowId) {
           try {
             await supabase.from('guest_comments').insert({
@@ -924,7 +934,7 @@ export const useBlueprintStore = create<AppState>()(
 
           const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
           const { nodes, edges } = blueprintToFlow(effectiveBp);
-          set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges });
+          set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
         } catch {}
       },
 
@@ -935,7 +945,7 @@ export const useBlueprintStore = create<AppState>()(
         const effectiveBp = getBlueprintForVersion(bp, versionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         set({
-          blueprint: bp, rfNodes: nodes, rfEdges: edges, mode: 'canvas',
+          blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, mode: 'canvas',
           selectedNodeId: null, inspectorOpen: false,
           activeVersionId: versionId, compareMode: false, presentMode: false,
           presentationEditMode: false, activePresentationId: null, currentKeyframeIndex: 0,
@@ -969,6 +979,7 @@ export const useBlueprintStore = create<AppState>()(
           blueprint: bp,
           rfNodes: nodes,
           rfEdges: edges,
+          effectiveActors: effectiveBp.actors,
           mode: 'canvas',
           selectedNodeId: null,
           inspectorOpen: false,
@@ -1215,15 +1226,17 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const newActor: Actor = { id: `actor-${Date.now()}`, name, color: nextColor(blueprint.actors), order: blueprint.actors.length };
-        apply(updatedAt({ ...blueprint, actors: [...blueprint.actors, newActor] }));
+        const eff = vRead();
+        const newActor: Actor = { id: `actor-${Date.now()}`, name, color: nextColor(eff.actors), order: eff.actors.length };
+        apply(updatedAt(vWrite(blueprint, { actors: [...eff.actors, newActor] })));
       },
 
       updateActor: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        apply(updatedAt({ ...blueprint, actors: blueprint.actors.map((a) => a.id === id ? { ...a, ...patch } : a) }));
+        const eff = vRead();
+        apply(updatedAt(vWrite(blueprint, { actors: eff.actors.map((a) => a.id === id ? { ...a, ...patch } : a) })));
       },
 
       removeActor: (id) => {
@@ -1243,11 +1256,11 @@ export const useBlueprintStore = create<AppState>()(
         const cleanedQuestions = newQuestions.map((q) => ({ ...q, actionIds: q.actionIds.filter((aid) => !actorActionIdSet.has(aid)) }));
         const bp = updatedAt(vWrite({
           ...blueprint,
-          actors: blueprint.actors.filter((a) => a.id !== id),
           customEdges: (blueprint.customEdges ?? []).filter(
             (e) => !actorActionIdSet.has(e.sourceActionId) && !actorActionIdSet.has(e.targetActionId)
           ),
         }, {
+          actors: eff.actors.filter((a) => a.id !== id),
           actions: eff.actions.filter((a) => a.actorId !== id),
           painPoints: cleanedPainPoints,
           opportunities: cleanedOpps,
@@ -1260,6 +1273,7 @@ export const useBlueprintStore = create<AppState>()(
           blueprint: bp,
           rfNodes: nodes,
           rfEdges: edges,
+          effectiveActors: effectiveBp.actors,
           ...(selectedActorId === id ? { selectedActorId: null, actorPanelOpen: false } : {}),
         });
       },
@@ -1268,20 +1282,20 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const sorted = [...blueprint.actors].sort((a, b) => a.order - b.order);
+        const eff = vRead();
+        const sorted = [...eff.actors].sort((a, b) => a.order - b.order);
         const idx = sorted.findIndex((a) => a.id === id);
         const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
         if (targetIdx < 0 || targetIdx >= sorted.length) return;
         const actor = sorted[idx];
         const target = sorted[targetIdx];
-        apply(updatedAt({
-          ...blueprint,
-          actors: blueprint.actors.map((a) =>
+        apply(updatedAt(vWrite(blueprint, {
+          actors: eff.actors.map((a) =>
             a.id === actor.id ? { ...a, order: target.order }
             : a.id === target.id ? { ...a, order: actor.order }
             : a
           ),
-        }));
+        })));
       },
 
       addPhase: (name) => {
@@ -1543,6 +1557,7 @@ export const useBlueprintStore = create<AppState>()(
         const newVersion: BlueprintVersion = {
           id,
           name,
+          actors: [...eff.actors],
           actions: [...eff.actions],
           painPoints: [...eff.painPoints],
           opportunities: [...eff.opportunities],
@@ -1552,7 +1567,7 @@ export const useBlueprintStore = create<AppState>()(
         const effectiveBp = getBlueprintForVersion(newBp, id);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         saveBlueprint(newBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, activeVersionId: id });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, activeVersionId: id });
       },
 
       switchVersion: (versionId) => {
@@ -1562,7 +1577,7 @@ export const useBlueprintStore = create<AppState>()(
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         const newBp = { ...blueprint, activeVersionId: versionId };
         saveBlueprint(newBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, activeVersionId: versionId });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, activeVersionId: versionId });
       },
 
       deleteVersion: (versionId) => {
@@ -1579,7 +1594,7 @@ export const useBlueprintStore = create<AppState>()(
         const effectiveBp = getBlueprintForVersion(newBp, newActiveId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         saveBlueprint(newBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, activeVersionId: newActiveId, compareVersionIds: newCompareIds });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, activeVersionId: newActiveId, compareVersionIds: newCompareIds });
       },
 
       renameVersion: (versionId, name) => {
@@ -1810,6 +1825,7 @@ export const useBlueprintStore = create<AppState>()(
 
           updates.rfNodes = nodes;
           updates.rfEdges = edges;
+          updates.effectiveActors = effectiveBp.actors;
         }
 
         set(updates as Partial<AppState>);
@@ -1871,7 +1887,7 @@ export const useBlueprintStore = create<AppState>()(
         if (!blueprint) return;
         const effectiveBp = getBlueprintForVersion(blueprint, activeVersionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
-        set({ rfNodes: nodes, rfEdges: edges });
+        set({ rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
       },
 
       setLightboxUrl: (url) => set({ lightboxUrl: url }),
@@ -2194,7 +2210,8 @@ export const useBlueprintStore = create<AppState>()(
         set({ overviewGenerating: true });
 
         try {
-          const actorMap = new Map(blueprint.actors.map((a) => [a.id, a.name]));
+          const eff = vRead();
+          const actorMap = new Map(eff.actors.map((a) => [a.id, a.name]));
           const phaseMap = new Map(blueprint.phases.map((p) => [p.id, p.name]));
 
           const actionsJson = blueprint.actions.map((a) => ({
@@ -2283,7 +2300,8 @@ Return ONLY a JSON object in this exact format:
         set({ overviewCellGenerating: true });
 
         try {
-          const actor = blueprint.actors.find((a) => a.id === actorId);
+          const eff = vRead();
+          const actor = eff.actors.find((a) => a.id === actorId);
           const phase = blueprint.phases.find((p) => p.id === phaseId);
           if (!actor || !phase) { set({ overviewCellGenerating: false }); return; }
 
@@ -2383,7 +2401,7 @@ Return ONLY a JSON object in this exact format:
             if (s.id !== storyboardId) return s;
             const frames = s.frames.map((f) => ({
               ...f,
-              imagePrompt: buildImagePrompt(f, guide, blueprint.actors),
+              imagePrompt: buildImagePrompt(f, guide, vRead().actors),
             }));
             return { ...s, styleGuide: guide, frames, updatedAt: new Date().toISOString() };
           }),
@@ -2404,7 +2422,7 @@ Return ONLY a JSON object in this exact format:
           imagePrompt: '',
           caption: 'New scene',
           phaseIds: [],
-          actorIds: blueprint.actors.map((a) => a.id),
+          actorIds: vRead().actors.map((a) => a.id),
           imageUrl: undefined,
         };
         const newBp = updatedAt({
@@ -2605,7 +2623,8 @@ Return ONLY a JSON object in this exact format:
       generateActorPortrait: async (actorId) => {
         const { blueprint, actorPortraitGenerating } = get();
         if (!blueprint || actorPortraitGenerating) return;
-        const actor = blueprint.actors.find((a) => a.id === actorId);
+        const eff = vRead();
+        const actor = eff.actors.find((a) => a.id === actorId);
         if (!actor) return;
 
         const parts = [`Professional portrait of ${actor.name}`];
@@ -2619,9 +2638,10 @@ Return ONLY a JSON object in this exact format:
           if (url) {
             const { blueprint: bp2 } = get();
             if (!bp2) return;
-            const newBp = updatedAt({ ...bp2, actors: bp2.actors.map((a) => a.id === actorId ? { ...a, portraitUrl: url } : a) });
+            const eff2 = vRead();
+            const newBp = updatedAt(vWrite(bp2, { actors: eff2.actors.map((a) => a.id === actorId ? { ...a, portraitUrl: url } : a) }));
             saveBlueprint(newBp);
-            set({ blueprint: newBp });
+            set({ blueprint: newBp, effectiveActors: getBlueprintForVersion(newBp, get().activeVersionId).actors });
           }
         } finally {
           set({ actorPortraitGenerating: null });
@@ -2768,7 +2788,7 @@ if (_shareToken) {
       _bootPromise = null; // Cancel any in-flight boot so the next login boots fresh
       useBlueprintStore.setState({ mode: 'auth', userId: null, userEmail: null,
         displayName: null, pendingNameCapture: false, blueprint: null,
-        rfNodes: [], rfEdges: [], activeVersionId: null, storyboardMode: false, frameworkMode: false });
+        rfNodes: [], rfEdges: [], effectiveActors: [], activeVersionId: null, storyboardMode: false, frameworkMode: false });
     }
   });
 

@@ -20,6 +20,7 @@ export function BlueprintCanvas() {
   const blueprint = useBlueprintStore((s) => s.blueprint);
   const storeNodes = useBlueprintStore((s) => s.rfNodes);
   const rfEdges = useBlueprintStore((s) => s.rfEdges);
+  const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
   const updateAction = useBlueprintStore((s) => s.updateAction);
   const removeAction = useBlueprintStore((s) => s.removeAction);
   const setSelectedNode = useBlueprintStore((s) => s.setSelectedNode);
@@ -142,7 +143,7 @@ export function BlueprintCanvas() {
         if (!isNaN(atOrder) && phaseId) {
           // Determine which actor row the card is in
           const rowHeights = computeActorRowHeights(blueprint);
-          const sortedActors = [...blueprint.actors].sort((a, b) => a.order - b.order);
+          const sortedActors = [...effectiveActors].sort((a, b) => a.order - b.order);
           let cumY = 0;
           let targetActorId = sortedActors[0]?.id ?? '';
           for (const actor of sortedActors) {

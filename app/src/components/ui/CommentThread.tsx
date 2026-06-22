@@ -10,6 +10,7 @@ import {
 } from '../../store/comments.store';
 import {
   COMMENT_REACTION_EMOJIS,
+  type Actor,
   type Blueprint,
   type Comment,
   type CommentAnchor,
@@ -79,7 +80,7 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-function anchorTitle(anchor: CommentAnchor, bp: Blueprint | null): string {
+function anchorTitle(anchor: CommentAnchor, bp: Blueprint | null, actors?: Actor[]): string {
   if (!bp) return 'Comment';
   switch (anchor.type) {
     case 'action': {
@@ -91,7 +92,7 @@ function anchorTitle(anchor: CommentAnchor, bp: Blueprint | null): string {
       return p?.name || 'Phase';
     }
     case 'actor': {
-      const a = bp.actors.find((x) => x.id === anchor.id);
+      const a = (actors ?? bp.actors).find((x) => x.id === anchor.id);
       return a?.name || 'Actor';
     }
     case 'edge':
@@ -139,6 +140,7 @@ export function CommentThread() {
   const displayName = useBlueprintStore((s) => s.displayName);
   const blueprintRowId = useBlueprintStore((s) => s.blueprintRowId);
   const blueprint = useBlueprintStore((s) => s.blueprint);
+  const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
   const collaborators = useCommentsStore((s) => s.collaborators);
   // True for any signed-in user with a loaded blueprint they can read —
   // i.e. the owner OR an accepted collaborator. RLS gates writes.
@@ -327,9 +329,9 @@ export function CommentThread() {
             minWidth: 0,
             flex: 1,
           }}
-          title={anchorTitle(openAnchor, blueprint)}
+          title={anchorTitle(openAnchor, blueprint, effectiveActors)}
         >
-          {anchorTitle(openAnchor, blueprint)}
+          {anchorTitle(openAnchor, blueprint, effectiveActors)}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
           {root && canParticipate && (

@@ -232,6 +232,7 @@ export function ViewBar() {
 
 function ViewPanel({ view, blueprint }: { view: Exclude<CanvasView, 'edit'>; blueprint: Blueprint }) {
   const setCanvasView = useBlueprintStore((s) => s.setCanvasView);
+  const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
   const items = view === 'pain-points'
     ? blueprint.painPoints
     : view === 'opportunities'
@@ -283,7 +284,7 @@ function ViewPanel({ view, blueprint }: { view: Exclude<CanvasView, 'edit'>; blu
             : view === 'opportunities' ? a.opportunityIds.includes(item.id)
             : (a.questionIds ?? []).includes(item.id)
           );
-          const actor = action ? blueprint.actors.find((a) => a.id === action.actorId) : null;
+          const actor = action ? effectiveActors.find((a) => a.id === action.actorId) : null;
           const phase = action ? blueprint.phases.find((p) => p.id === action.phaseId) : null;
 
           const bgMap = {

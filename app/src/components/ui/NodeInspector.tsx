@@ -64,7 +64,7 @@ export function NodeInspector() {
   const effectiveBp = blueprint ? getBlueprintForVersion(blueprint, activeVersionId) : null;
 
   const action = effectiveBp?.actions.find((a) => a.id === selectedNodeId) ?? null;
-  const actor = action ? blueprint?.actors.find((a) => a.id === action.actorId) : null;
+  const actor = action ? effectiveBp?.actors.find((a) => a.id === action.actorId) : null;
   const painPoints = action ? effectiveBp!.painPoints.filter((p) => action.painPointIds.includes(p.id)) : [];
   const opportunities = action ? effectiveBp!.opportunities.filter((o) => action.opportunityIds.includes(o.id)) : [];
   const questions = action ? (effectiveBp!.questions ?? []).filter((q) => (action.questionIds ?? []).includes(q.id)) : [];

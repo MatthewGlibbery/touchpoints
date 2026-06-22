@@ -7,7 +7,7 @@ import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 const ACTOR_ICONS = [User, Globe, Building2, Users];
 
 export function ActorPanel() {
-  const blueprint = useBlueprintStore((s) => s.blueprint);
+  const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
   const selectedActorId = useBlueprintStore((s) => s.selectedActorId);
   const actorPanelOpen = useBlueprintStore((s) => s.actorPanelOpen);
   const setSelectedActor = useBlueprintStore((s) => s.setSelectedActor);
@@ -20,7 +20,7 @@ export function ActorPanel() {
   const isCollaboratorView = useBlueprintStore((s) => s.isCollaboratorView);
   const editLocked = commentMode || isGuestView || isCollaboratorView;
 
-  const actor = blueprint?.actors.find((a) => a.id === selectedActorId) ?? null;
+  const actor = effectiveActors.find((a) => a.id === selectedActorId) ?? null;
 
   const [nameDraft, setNameDraft] = useState('');
   const [bioDraft, setBioDraft] = useState('');

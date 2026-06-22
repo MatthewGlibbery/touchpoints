@@ -6,7 +6,14 @@ export function getBlueprintForVersion(bp: Blueprint, versionId?: string | null)
   if (!versionId) return bp;
   const v = bp.versions?.find((v) => v.id === versionId);
   if (!v) return bp;
-  return { ...bp, actions: v.actions, painPoints: v.painPoints, opportunities: v.opportunities, questions: v.questions };
+  return {
+    ...bp,
+    actors: v.actors ?? bp.actors,
+    actions: v.actions,
+    painPoints: v.painPoints,
+    opportunities: v.opportunities,
+    questions: v.questions,
+  };
 }
 
 

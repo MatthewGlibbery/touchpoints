@@ -23,6 +23,7 @@ export function DetachedThreadsModal() {
   const removeComment = useCommentsStore((s) => s.removeComment);
 
   const blueprint = useBlueprintStore((s) => s.blueprint);
+  const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
   const userId = useBlueprintStore((s) => s.userId);
 
   // Detached root comments (the rest of the thread is implied)
@@ -50,7 +51,7 @@ export function DetachedThreadsModal() {
     for (const p of blueprint.phases) {
       out.push({ type: 'phase', id: p.id, label: `Phase: ${p.name}` });
     }
-    for (const ac of blueprint.actors) {
+    for (const ac of effectiveActors) {
       out.push({ type: 'actor', id: ac.id, label: `Actor: ${ac.name}` });
     }
     return out;

@@ -101,8 +101,8 @@ export default function App() {
           const col = bp.actions
             .filter((a) => a.phaseId === cur.phaseId && a.order === cur.order)
             .sort((a, b) => {
-              const ao = bp.actors.find((x) => x.id === a.actorId)?.order ?? 0;
-              const bo = bp.actors.find((x) => x.id === b.actorId)?.order ?? 0;
+              const ao = state.effectiveActors.find((x) => x.id === a.actorId)?.order ?? 0;
+              const bo = state.effectiveActors.find((x) => x.id === b.actorId)?.order ?? 0;
               return ao - bo;
             });
           const i = col.findIndex((a) => a.id === cur.id);
