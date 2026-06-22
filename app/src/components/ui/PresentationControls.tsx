@@ -1,8 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { ChevronLeft, ChevronRight, X, RotateCcw } from 'lucide-react';
-import { useStore } from '@xyflow/react';
 import { useBlueprintStore } from '../../store/blueprint.store';
-import { animateToViewport } from '../../lib/viewportBridge';
+import { animateToViewport, captureViewport } from '../../lib/viewportBridge';
 import type { PresentationKeyframe } from '../../types/blueprint';
 
 // Threshold for considering the viewport "moved" from the slide position
@@ -33,18 +32,29 @@ export function PresentationControls() {
   const keyframes = activePresentation?.keyframes ?? [];
   const total = keyframes.length;
 
-  // Track viewport drift from the current slide
-  const transform = useStore((s) => s.transform);
+  // Track viewport drift from the current slide via polling (avoids needing
+  // to be inside a ReactFlowProvider — PresentationControls is rendered as an
+  // overlay sibling, not inside the ReactFlow tree).
   const currentKf: PresentationKeyframe | undefined = keyframes[currentKfIdx];
   const [drifted, setDrifted] = useState(false);
+  const rafRef = useRef<number>(0);
 
   useEffect(() => {
     if (!currentKf || currentKf.compareMode) {
       setDrifted(false);
       return;
     }
-    setDrifted(hasViewportDrifted(transform, currentKf.viewport));
-  }, [transform, currentKf]);
+    const check = () => {
+      const vp = captureViewport();
+      if (vp) {
+        const transform: [number, number, number] = [vp.x, vp.y, vp.zoom];
+        setDrifted(hasViewportDrifted(transform, currentKf.viewport));
+      }
+      rafRef.current = requestAnimationFrame(check);
+    };
+    rafRef.current = requestAnimationFrame(check);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [currentKf]);
 
   // Reset drift flag when slide changes
   useEffect(() => {
