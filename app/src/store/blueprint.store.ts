@@ -1773,9 +1773,10 @@ export const useBlueprintStore = create<AppState>()(
       },
 
       applyKeyframeState: (kf) => {
-        const { blueprint, activeVersionId } = get();
+        const { blueprint, activeVersionId, overviewMode: currentOverviewMode } = get();
         if (!blueprint) return;
 
+        const targetOverviewMode = kf.overviewMode ?? false;
         const updates: Partial<AppState> = {
           canvasView: kf.canvasView ?? 'edit',
           selectedNodeId: kf.selectedNodeId ?? null,
@@ -1786,21 +1787,29 @@ export const useBlueprintStore = create<AppState>()(
           edgeInspectorOpen: false,
           compareMode: kf.compareMode ?? false,
           compareVersionIds: kf.compareVersionIds ?? [null, null],
-          overviewMode: kf.overviewMode ?? false,
+          overviewMode: targetOverviewMode,
           multiSelectedNodeIds: kf.multiSelectedNodeIds ?? [],
         };
 
-        // Switch version if keyframe specifies one (null = base version, undefined = base version)
+        // Rebuild layout if version or overview mode changed
         const targetVersionId = kf.versionId ?? null;
-        if (targetVersionId !== activeVersionId) {
+        const versionChanged = targetVersionId !== activeVersionId;
+        const overviewChanged = targetOverviewMode !== currentOverviewMode;
+
+        if (versionChanged || overviewChanged) {
           const effectiveBp = getBlueprintForVersion(blueprint, targetVersionId);
-          const { nodes, edges } = blueprintToFlow(effectiveBp);
-          const newBp = { ...blueprint, activeVersionId: targetVersionId };
-          saveBlueprint(newBp);
-          updates.blueprint = newBp as Blueprint;
+          const displayBp = targetOverviewMode ? buildOverviewBlueprint(effectiveBp) : effectiveBp;
+          const { nodes, edges } = blueprintToFlow(displayBp, { overviewMode: targetOverviewMode });
+
+          if (versionChanged) {
+            const newBp = { ...blueprint, activeVersionId: targetVersionId };
+            saveBlueprint(newBp);
+            updates.blueprint = newBp as Blueprint;
+            updates.activeVersionId = targetVersionId;
+          }
+
           updates.rfNodes = nodes;
           updates.rfEdges = edges;
-          updates.activeVersionId = targetVersionId;
         }
 
         set(updates as Partial<AppState>);
