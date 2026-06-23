@@ -13,6 +13,7 @@ const ACTOR_ICONS = [User, Globe, Building2, Users];
 export function PhaseInspector() {
   const blueprint = useBlueprintStore((s) => s.blueprint);
   const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
+  const effectivePhases = useBlueprintStore((s) => s.effectivePhases);
   const selectedPhaseId = useBlueprintStore((s) => s.selectedPhaseId);
   const phaseInspectorOpen = useBlueprintStore((s) => s.phaseInspectorOpen);
   const setSelectedPhase = useBlueprintStore((s) => s.setSelectedPhase);
@@ -31,9 +32,9 @@ export function PhaseInspector() {
   const [generating, setGenerating] = useState(false);
   const [confirmDeletePhase, setConfirmDeletePhase] = useState(false);
 
-  const phase = blueprint?.phases.find((p) => p.id === selectedPhaseId) ?? null;
+  const phase = effectivePhases.find((p) => p.id === selectedPhaseId) ?? null;
 
-  const sortedPhases = blueprint ? [...blueprint.phases].sort((a, b) => a.order - b.order) : [];
+  const sortedPhases = [...effectivePhases].sort((a, b) => a.order - b.order);
   const phaseIdx = sortedPhases.findIndex((p) => p.id === selectedPhaseId);
   const prevPhase = phaseIdx > 0 ? sortedPhases[phaseIdx - 1] : null;
   const nextPhase = phaseIdx >= 0 && phaseIdx < sortedPhases.length - 1 ? sortedPhases[phaseIdx + 1] : null;

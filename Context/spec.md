@@ -35,9 +35,12 @@ compareMode = true           → SplitCanvas rendered as canvas layer; other UI 
 commentMode = false          → normal
 commentMode = true           → read-only commenting mode (cursor turns into a comment bubble,
                                hover highlights any structural element, click attaches a thread)
+frameworkMode = false        → normal
+frameworkMode = true         → FrameworksView replaces canvas (axis-based prioritisation;
+                               plot cards on single axes, combine 2-3 axes in 2D/3D)
 ```
 
-`presentMode`, `presentationEditMode`, `storyboardMode`, and `commentMode` are mutually exclusive. `compareMode` can coexist with `presentationEditMode` (SlidePanel overlays SplitCanvas).
+`presentMode`, `presentationEditMode`, `storyboardMode`, `frameworkMode`, and `commentMode` are mutually exclusive. `compareMode` can coexist with `presentationEditMode` (SlidePanel overlays SplitCanvas).
 
 ### Data flow
 ```
@@ -65,6 +68,7 @@ User input → AI (Claude tool use) → Blueprint (typed data model)
 | Persistence | Supabase Postgres (primary) + LocalStorage (offline cache/fallback) |
 | Voice | Web Speech API (browser-native) |
 | Icons | Lucide React |
+| 3D | Three.js via `@react-three/fiber` + `@react-three/drei` (lazy-loaded, code-split) |
 
 ---
 
@@ -118,6 +122,8 @@ type Blueprint   = { id, name, actors, phases, actions, touchpoints,
                      storyboards?,      // Journey Map storyboards
                      statusLanes?,      // StatusLane[] — horizontal lanes between phase header and actor rows
                      timelineLanes?,    // TimelineLane[] — horizontal lanes above phase header
+                     frameworkAxes?,    // FrameworkAxis[] — reusable axes for prioritisation
+                     frameworks?,       // Framework[] — named 2D/3D axis combinations
                    }
 
 // Lanes: horizontal tracks outside the actor swimlane region. Each lane has
@@ -131,6 +137,12 @@ type TimelineLane  = { id, name, color, order, visible, segments: LaneSegment[] 
 type StoryboardStyleGuide = { baseStyle: string, characterDescriptions: Record<actorId, string> }
 type StoryboardFrame      = { id, order, sceneDescription, imagePrompt, imageUrl?, caption, phaseIds, actorIds }
 type Storyboard           = { id, name, styleGuide, frames, createdAt, updatedAt }
+
+// Framework / axis types — for prioritisation views
+// Card positions are stored PER-AXIS (reusable across frameworks)
+type FrameworkAxis = { id, title, lowLabel, highLabel, cardPositions: Record<cardId, 0-9> }
+type Framework     = { id, name, axisIds: string[], mode: '2d'|'3d' }
+// Blueprint gains: frameworkAxes?: FrameworkAxis[], frameworks?: Framework[]
 
 // Style presets — stored INDEPENDENTLY of Blueprint in localStorage key 'touchpoints-style-presets'
 // Lives in app/src/lib/styleLibrary.ts; contains only baseStyle (not character descriptions)

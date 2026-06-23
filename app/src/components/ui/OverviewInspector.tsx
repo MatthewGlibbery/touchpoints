@@ -11,6 +11,7 @@ type OverviewTab = 'steps' | 'pains' | 'opportunities' | 'questions';
 export function OverviewInspector() {
   const blueprint              = useBlueprintStore((s) => s.blueprint);
   const effectiveActors        = useBlueprintStore((s) => s.effectiveActors);
+  const effectivePhases        = useBlueprintStore((s) => s.effectivePhases);
   const selectedOverviewCell   = useBlueprintStore((s) => s.selectedOverviewCell);
   const overviewCellGenerating = useBlueprintStore((s) => s.overviewCellGenerating);
   const clearOverviewCell      = useBlueprintStore((s) => s.clearOverviewCell);
@@ -29,7 +30,7 @@ export function OverviewInspector() {
 
   const { actorId, phaseId, actionId } = selectedOverviewCell;
   const actor = effectiveActors.find((a) => a.id === actorId);
-  const phase = blueprint.phases.find((p) => p.id === phaseId);
+  const phase = effectivePhases.find((p) => p.id === phaseId);
   if (!actor || !phase) return null;
 
   const ActorIcon = ACTOR_ICONS[actor.order % ACTOR_ICONS.length] ?? Activity;

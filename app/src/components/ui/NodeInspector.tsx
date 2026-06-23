@@ -72,8 +72,8 @@ export function NodeInspector() {
   // All actions sorted by phase order, then substep order — for cross-phase prev/next navigation
   const allActionsOrdered = blueprint
     ? [...blueprint.actions].sort((a, b) => {
-        const phaseOrderA = blueprint.phases.find((p) => p.id === a.phaseId)?.order ?? 0;
-        const phaseOrderB = blueprint.phases.find((p) => p.id === b.phaseId)?.order ?? 0;
+        const phaseOrderA = effectiveBp?.phases.find((p) => p.id === a.phaseId)?.order ?? 0;
+        const phaseOrderB = effectiveBp?.phases.find((p) => p.id === b.phaseId)?.order ?? 0;
         if (phaseOrderA !== phaseOrderB) return phaseOrderA - phaseOrderB;
         return a.order - b.order;
       })

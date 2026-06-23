@@ -149,6 +149,7 @@ export function ViewPanel_() {
 function ViewPanel({ view, blueprint }: { view: 'pain-points' | 'opportunities' | 'questions'; blueprint: Blueprint }) {
   const setCanvasView = useBlueprintStore((s) => s.setCanvasView);
   const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
+  const effectivePhases = useBlueprintStore((s) => s.effectivePhases);
   const items = view === 'pain-points'
     ? blueprint.painPoints
     : view === 'opportunities'
@@ -212,7 +213,7 @@ function ViewPanel({ view, blueprint }: { view: 'pain-points' | 'opportunities' 
             : (a.questionIds ?? []).includes(item.id)
           );
           const actor = action ? effectiveActors.find((a) => a.id === action.actorId) : null;
-          const phase = action ? blueprint.phases.find((p) => p.id === action.phaseId) : null;
+          const phase = action ? effectivePhases.find((p) => p.id === action.phaseId) : null;
 
           const label = view === 'pain-points' && item.severity
             ? item.severity

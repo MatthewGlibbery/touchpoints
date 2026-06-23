@@ -8,11 +8,23 @@ export function getBlueprintForVersion(bp: Blueprint, versionId?: string | null)
   if (!v) return bp;
   return {
     ...bp,
-    actors: v.actors ?? bp.actors,
+    actors: v.actors,
+    phases: v.phases,
     actions: v.actions,
     painPoints: v.painPoints,
     opportunities: v.opportunities,
     questions: v.questions,
+    edgeMeta: v.edgeMeta,
+    removedEdgeIds: v.removedEdgeIds,
+    customEdges: v.customEdges,
+    touchpointTags: v.touchpointTags,
+    overviewActionIds: v.overviewActionIds,
+    overviewCellDescriptions: v.overviewCellDescriptions,
+    statusLanes: v.statusLanes,
+    timelineLanes: v.timelineLanes,
+    storyboards: v.storyboards,
+    frameworkAxes: v.frameworkAxes,
+    frameworks: v.frameworks,
   };
 }
 

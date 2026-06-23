@@ -24,6 +24,7 @@ export function DetachedThreadsModal() {
 
   const blueprint = useBlueprintStore((s) => s.blueprint);
   const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
+  const effectivePhases = useBlueprintStore((s) => s.effectivePhases);
   const userId = useBlueprintStore((s) => s.userId);
 
   // Detached root comments (the rest of the thread is implied)
@@ -41,14 +42,14 @@ export function DetachedThreadsModal() {
     if (!blueprint) return [];
     const out: ReanchorChoice[] = [];
     for (const a of blueprint.actions) {
-      const ph = blueprint.phases.find((p) => p.id === a.phaseId);
+      const ph = effectivePhases.find((p) => p.id === a.phaseId);
       out.push({
         type: 'action',
         id: a.id,
         label: ph ? `Step: ${a.label} (${ph.name})` : `Step: ${a.label}`,
       });
     }
-    for (const p of blueprint.phases) {
+    for (const p of effectivePhases) {
       out.push({ type: 'phase', id: p.id, label: `Phase: ${p.name}` });
     }
     for (const ac of effectiveActors) {

@@ -58,6 +58,7 @@ export const PhaseBoundaryNode = memo(({ data }: NodeProps) => {
         userSelect: 'none',
         zIndex: 5,
         position: 'relative',
+        overflow: 'visible',
       }}
     >
       {/* Header zone — draggable */}
@@ -74,10 +75,15 @@ export const PhaseBoundaryNode = memo(({ data }: NodeProps) => {
           justifyContent: 'center',
           cursor: 'ew-resize',
           flexShrink: 0,
+          position: 'relative',
         }}
       >
         <div
           style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
             width: 24,
             height: 24,
             borderRadius: '50%',

@@ -11,6 +11,7 @@ interface ConfirmDeleteModalProps {
 export function ConfirmDeleteModal({ title, description, onConfirm, onCancel }: ConfirmDeleteModalProps) {
   return createPortal(
     <div
+      onMouseDown={(e) => e.stopPropagation()}
       onClick={onCancel}
       style={{
         position: 'fixed',

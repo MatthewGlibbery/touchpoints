@@ -116,11 +116,23 @@ export type Presentation = {
 export type BlueprintVersion = {
   id: string;
   name: string;
-  actors?: Actor[];
+  actors: Actor[];
+  phases: Phase[];
   actions: Action[];
   painPoints: PainPoint[];
   opportunities: Opportunity[];
   questions: Question[];
+  edgeMeta?: Record<string, EdgeMeta>;
+  removedEdgeIds?: string[];
+  customEdges?: CustomEdge[];
+  touchpointTags?: string[];
+  overviewActionIds?: string[];
+  overviewCellDescriptions?: Record<string, string>;
+  statusLanes?: StatusLane[];
+  timelineLanes?: TimelineLane[];
+  storyboards?: Storyboard[];
+  frameworkAxes?: FrameworkAxis[];
+  frameworks?: Framework[];
 };
 
 export type StoryboardStyleGuide = {

@@ -145,6 +145,7 @@ export function DotBackground() {
         height: '100%',
         pointerEvents: 'none',
         zIndex: 0,
+        opacity: 0.75,
       }}
     />
   );

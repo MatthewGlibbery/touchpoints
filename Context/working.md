@@ -2,6 +2,68 @@
 
 ## Current Objective
 
+**Session AO: Frameworks mode + UI polish + Export for AI — DONE (2026-06-16)** — New "Frameworks" mode for axis-based prioritisation, multiple layout/UX fixes, and AI-targeted markdown export.
+
+### Done in Session AO (2026-06-16)
+
+#### Frameworks mode (new feature)
+- **Data model** — `FrameworkAxis { id, title, lowLabel, highLabel, cardPositions: Record<cardId, 0-9> }` and `Framework { id, name, axisIds[], mode: '2d'|'3d' }` added to `types/blueprint.ts`. Card positions live on the axis (reusable across frameworks).
+- **Store** — `frameworkMode`, `activeFrameworkId`, `activeAxisId` state. CRUD: `addFrameworkAxis`, `updateFrameworkAxis`, `removeFrameworkAxis`, `addFramework`, `updateFramework`, `removeFramework`, `setCardAxisPosition(axisId, cardId, value)`, `removeCardFromAxis`. Mutual exclusion with storyboard/present/compare/comment modes.
+- **ModeBar** — "Frameworks" tab added (Grid3X3 icon). Mode toggle between Plot (single axis) and Combine (2D/3D).
+- **SingleAxisView** — Horizontal axis with 10 snap columns. Cards stack vertically; overflow shows `+N` badge that expands on hover. Drag from dugout to place.
+- **DualAxisView** — 10×10 grid with axes crossing at center (+). Cards at intersections. Drag-to-reposition. Reads positions from each axis's `cardPositions`.
+- **ThreeAxisView** — Three.js (`@react-three/fiber` + `@react-three/drei`), lazy-loaded/code-split. Axes cross at origin. Billboard cards, orbit controls, drag-to-reposition in 3D space. Drop from dugout places at center.
+- **CardDugout** — Right panel showing unplaced cards. Filters: type (pain/opp/question) + severity for pains.
+- **AxisConfigurator** — Modal to create/edit/delete reusable axes.
+- **CreateFrameworkModal** — Select 2–3 axes, name it, auto-detects 2D vs 3D mode.
+- **FrameworkCard** — Compact draggable card with type-based styling (red/green/amber).
+
+#### NodeInspector updates
+- **Tab rename**: "Details" → "Step"
+- **Field labels**: "Step name" → "Title", "What this step is responsible for" → "Details"
+- **Hidden sections**: Tags and Touchpoints hidden (TODO: revisit later)
+- **Removed**: Frameworks section (axis positions are per-card, not per-step)
+
+#### Layout/spacing fixes
+- **Phase-to-status gap**: Added `PHASE_STATUS_GAP = 12px` between phase header row and first status lane row.
+- **Phase header internal padding**: 6px padding inside each PhaseHeaderNode creates 12px visual gap between adjacent phase backgrounds (aligns with status segment gaps). Phases and statuses share the same column grid — they align vertically.
+- **Phase boundary vertical line hidden**: Only shows a 24×24 circle with drag icon on hover (no visible pill at rest, no vertical line).
+- **Border radii standardized**: Action cards and status segments changed from `--radius-lg` (12px) to `--radius-md` (10px), matching phase headers.
+
+#### Canvas/dot grid
+- **Minimap hidden** (TODO: revisit this decision later)
+- **Dot hover effect enhanced**: `DOT_MAX_RADIUS` 1.55→1.9, `EFFECT_RADIUS` 80→100px, dots darken toward cursor center (color lerp to 35% darker variant using smoothstep).
+
+#### Top bar / navigation
+- **"People" → "Share"**: Button text and icon changed to Share2, moved to far-right corner.
+- **Notifications bell**: Moved from UserMenu (top-right) to ProjectBar (next to board title, left side). Dropdown opens rightward (`left: 0` instead of `right: 0`).
+- **Avatar circle**: Shrunk from 36px to 30px (matches Share button height). Moved to left of Share button.
+
+#### Export for AI
+- **`app/src/lib/exportAI.ts`** — `exportBlueprintForAI(blueprint)` generates token-efficient markdown. Structure: actors → axes → phases (with actions grouped by actor, pains/opps/questions as sub-bullets with axis annotations like `{Impact:7, Effort:3}`) → relationships → framework combinations.
+- **ExportAISection** in CollaboratorsPanel — "Download .md" and "Copy" buttons below the share link section.
+
+### TODO (revisit later)
+- [ ] Minimap — hidden for now, decide whether to bring it back
+- [ ] Tags section in NodeInspector (decision points, custom tags)
+- [ ] Touchpoints section in NodeInspector
+- [ ] Framework axis positions shown on individual pain/opportunity/question items in the inspector
+
+### Verification
+- [x] TypeScript compiles (`npx tsc --noEmit`)
+- [x] Production build passes (`npx vite build`)
+- [x] Three.js properly code-split (lazy-loaded only when entering 3D mode)
+- [ ] Manual: Frameworks tab appears in ModeBar, clicking enters Frameworks view
+- [ ] Manual: Can create axes, plot cards on single axis, cards snap to 10 positions
+- [ ] Manual: Can create 2D/3D combination, cards appear at their axis intersections
+- [ ] Manual: Dugout shows unplaced cards, drag onto axis/grid places them
+- [ ] Manual: Share panel shows "Export for AI" section, download produces valid .md
+- [ ] Manual: Notification bell dropdown opens rightward
+- [ ] Manual: Phases have visible gap between them matching status segment gaps
+- [ ] Manual: Dot grid hover effect is noticeably stronger
+
+---
+
 **Session AN: Edge ordering + AI badges + UI restructure + media upload — DONE (2026-05-25)** — four workstreams covering connector polish, AI-generated indicator badges, navigation/menu rearrangement, image upload, and user avatar/profile area.
 
 ### Done in Session AN (2026-05-25)

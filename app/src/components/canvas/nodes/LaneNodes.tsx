@@ -901,7 +901,7 @@ export const TimelineSegmentNode = memo(({ data }: NodeProps) => {
           flexShrink: 0,
         }} />
 
-        {!readOnly && !editing && selected && (
+        {!readOnly && !editing && (
           <>
             <div
               onMouseEnter={() => !drag.dragging && setHoveredEdge('left')}

@@ -216,6 +216,7 @@ function JourneyMapPresenter({
 export function JourneyMapView() {
   const blueprint               = useBlueprintStore((s) => s.blueprint);
   const effectiveActors         = useBlueprintStore((s) => s.effectiveActors);
+  const effectivePhases         = useBlueprintStore((s) => s.effectivePhases);
   const setStoryboardMode       = useBlueprintStore((s) => s.setStoryboardMode);
   const storyboards             = blueprint?.storyboards ?? [];
   const activeStoryboardId      = useBlueprintStore((s) => s.activeStoryboardId);
@@ -530,7 +531,7 @@ export function JourneyMapView() {
                 frame={selectedFrame}
                 storyboardId={activeStoryboard.id}
                 actors={effectiveActors}
-                phases={blueprint.phases}
+                phases={effectivePhases}
                 isGenerating={selectedFrame.id === storyboardGeneratingFrameId}
                 onCaptionChange={(text) =>
                   updateStoryboardFrame(activeStoryboard.id, selectedFrame.id, { caption: text })

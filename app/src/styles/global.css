@@ -83,6 +83,9 @@
   transition: transform 320ms ease-in-out;
 }
 
+.react-flow__node-phaseBoundary {
+  overflow: visible !important;
+}
 /* ─── Action node connection handles ────────────────────────────────────────── */
 
 .react-flow__node-action .react-flow__handle {

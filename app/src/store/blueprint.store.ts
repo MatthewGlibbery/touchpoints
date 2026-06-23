@@ -20,10 +20,22 @@ type Theme = 'light' | 'dark';
 
 type ContentData = {
   actors?: Actor[];
+  phases?: Phase[];
   actions?: Action[];
   painPoints?: PainPoint[];
   opportunities?: Opportunity[];
   questions?: Question[];
+  edgeMeta?: Record<string, EdgeMeta>;
+  removedEdgeIds?: string[];
+  customEdges?: CustomEdge[];
+  touchpointTags?: string[];
+  overviewActionIds?: string[];
+  overviewCellDescriptions?: Record<string, string>;
+  statusLanes?: StatusLane[];
+  timelineLanes?: TimelineLane[];
+  storyboards?: Storyboard[];
+  frameworkAxes?: FrameworkAxis[];
+  frameworks?: Framework[];
 };
 
 type AppState = {
@@ -51,6 +63,7 @@ type AppState = {
   rfNodes: Node[];
   rfEdges: Edge[];
   effectiveActors: Actor[];
+  effectivePhases: Phase[];
   selectedNodeId: string | null;
   inspectorOpen: boolean;
   inspectorRequestedTab: string | null;
@@ -399,35 +412,74 @@ export const useBlueprintStore = create<AppState>()(
 
     // ─── Version-aware helpers ──────────────────────────────────────────────
     // Read effective content (from active version or base)
-    const vRead = (): { actors: Actor[]; actions: Action[]; painPoints: PainPoint[]; opportunities: Opportunity[]; questions: Question[] } => {
+    const vRead = (): ContentData & { actors: Actor[]; phases: Phase[]; actions: Action[]; painPoints: PainPoint[]; opportunities: Opportunity[]; questions: Question[] } => {
       const { blueprint, activeVersionId } = get();
-      if (!blueprint) return { actors: [], actions: [], painPoints: [], opportunities: [], questions: [] };
+      if (!blueprint) return { actors: [], phases: [], actions: [], painPoints: [], opportunities: [], questions: [] };
       if (!activeVersionId) return {
         actors: blueprint.actors,
+        phases: blueprint.phases,
         actions: blueprint.actions,
         painPoints: blueprint.painPoints,
         opportunities: blueprint.opportunities,
         questions: blueprint.questions ?? [],
+        edgeMeta: blueprint.edgeMeta,
+        removedEdgeIds: blueprint.removedEdgeIds,
+        customEdges: blueprint.customEdges,
+        touchpointTags: blueprint.touchpointTags,
+        overviewActionIds: blueprint.overviewActionIds,
+        overviewCellDescriptions: blueprint.overviewCellDescriptions,
+        statusLanes: blueprint.statusLanes,
+        timelineLanes: blueprint.timelineLanes,
+        storyboards: blueprint.storyboards,
+        frameworkAxes: blueprint.frameworkAxes,
+        frameworks: blueprint.frameworks,
       };
       const v = blueprint.versions?.find((v) => v.id === activeVersionId);
       if (!v) return {
         actors: blueprint.actors,
+        phases: blueprint.phases,
         actions: blueprint.actions,
         painPoints: blueprint.painPoints,
         opportunities: blueprint.opportunities,
         questions: blueprint.questions ?? [],
+        edgeMeta: blueprint.edgeMeta,
+        removedEdgeIds: blueprint.removedEdgeIds,
+        customEdges: blueprint.customEdges,
+        touchpointTags: blueprint.touchpointTags,
+        overviewActionIds: blueprint.overviewActionIds,
+        overviewCellDescriptions: blueprint.overviewCellDescriptions,
+        statusLanes: blueprint.statusLanes,
+        timelineLanes: blueprint.timelineLanes,
+        storyboards: blueprint.storyboards,
+        frameworkAxes: blueprint.frameworkAxes,
+        frameworks: blueprint.frameworks,
       };
-      return { actors: v.actors ?? blueprint.actors, actions: v.actions, painPoints: v.painPoints, opportunities: v.opportunities, questions: v.questions };
+      return {
+        actors: v.actors,
+        phases: v.phases,
+        actions: v.actions,
+        painPoints: v.painPoints,
+        opportunities: v.opportunities,
+        questions: v.questions,
+        edgeMeta: v.edgeMeta,
+        removedEdgeIds: v.removedEdgeIds,
+        customEdges: v.customEdges,
+        touchpointTags: v.touchpointTags,
+        overviewActionIds: v.overviewActionIds,
+        overviewCellDescriptions: v.overviewCellDescriptions,
+        statusLanes: v.statusLanes,
+        timelineLanes: v.timelineLanes,
+        storyboards: v.storyboards,
+        frameworkAxes: v.frameworkAxes,
+        frameworks: v.frameworks,
+      };
     };
 
     // Write content to active version or base
     const vWrite = (bp: Blueprint, data: ContentData): Blueprint => {
       const { activeVersionId } = get();
       if (!activeVersionId) {
-        const { actors, ...rest } = data;
-        const updated = { ...bp, ...rest };
-        if (actors) updated.actors = actors;
-        return updated;
+        return { ...bp, ...data };
       }
       return {
         ...bp,
@@ -521,7 +573,7 @@ export const useBlueprintStore = create<AppState>()(
       const displayBp = overviewMode ? buildOverviewBlueprint(effectiveBp) : effectiveBp;
       const { nodes, edges } = blueprintToFlow(displayBp, { overviewMode });
       saveBlueprint(bp);
-      set({ blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
+      set({ blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases });
     };
 
     return {
@@ -543,6 +595,7 @@ export const useBlueprintStore = create<AppState>()(
       rfNodes: [],
       rfEdges: [],
       effectiveActors: [],
+      effectivePhases: [],
       selectedNodeId: null,
       inspectorOpen: false,
       inspectorRequestedTab: null,
@@ -619,7 +672,7 @@ export const useBlueprintStore = create<AppState>()(
         const effectiveBp = getBlueprintForVersion(blueprint, versionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         saveBlueprint(blueprint);
-        set({ blueprint, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, mode: 'canvas', activeVersionId: versionId, overviewMode: false, blueprintRowId: null, commentMode: false, isCollaboratorView: false });
+        set({ blueprint, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases, mode: 'canvas', activeVersionId: versionId, overviewMode: false, blueprintRowId: null, commentMode: false, isCollaboratorView: false });
         loadCommentsForBlueprint(blueprint.id);
       },
 
@@ -646,7 +699,7 @@ export const useBlueprintStore = create<AppState>()(
         const { nodes, edges } = blueprintToFlow(bp);
         saveBlueprint(bp);
         set({
-          blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: bp.actors, mode: 'canvas', activeVersionId: null,
+          blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: bp.actors, effectivePhases: bp.phases, mode: 'canvas', activeVersionId: null,
           selectedNodeId: null, inspectorOpen: false,
           selectedActorId: null, actorPanelOpen: false,
           selectedPhaseId: null, phaseInspectorOpen: false,
@@ -723,7 +776,7 @@ export const useBlueprintStore = create<AppState>()(
         useCommentsStore.getState().clear();
         set({ mode: 'auth', userId: null, userEmail: null, displayName: null,
           pendingNameCapture: false, pendingMigration: null, blueprint: null,
-          rfNodes: [], rfEdges: [], effectiveActors: [], activeVersionId: null, blueprintRowId: null, commentMode: false,
+          rfNodes: [], rfEdges: [], effectiveActors: [], effectivePhases: [], activeVersionId: null, blueprintRowId: null, commentMode: false,
           isCollaboratorView: false });
       },
 
@@ -755,7 +808,7 @@ export const useBlueprintStore = create<AppState>()(
           const storedName = sessionStorage.getItem('guest-name') || null;
           const guestRowId = (data.blueprintRowId ?? null) as string | null;
           set({
-            blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: bp.actors, mode: 'canvas',
+            blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: bp.actors, effectivePhases: bp.phases, mode: 'canvas',
             isGuestView: true, shareToken: token,
             guestCanComment: data.canComment ?? true,
             guestShareId: data.shareId ?? null,
@@ -803,7 +856,7 @@ export const useBlueprintStore = create<AppState>()(
         };
         const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases });
         if (guestShareId && guestBlueprintRowId) {
           try {
             await supabase.from('guest_comments').insert({
@@ -828,7 +881,7 @@ export const useBlueprintStore = create<AppState>()(
         };
         const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases });
         if (guestShareId && guestBlueprintRowId) {
           try {
             await supabase.from('guest_comments').insert({
@@ -853,7 +906,7 @@ export const useBlueprintStore = create<AppState>()(
         };
         const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases });
         if (guestShareId && guestBlueprintRowId) {
           try {
             await supabase.from('guest_comments').insert({
@@ -934,7 +987,7 @@ export const useBlueprintStore = create<AppState>()(
 
           const effectiveBp = getBlueprintForVersion(newBp, activeVersionId);
           const { nodes, edges } = blueprintToFlow(effectiveBp);
-          set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
+          set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases });
         } catch {}
       },
 
@@ -945,7 +998,7 @@ export const useBlueprintStore = create<AppState>()(
         const effectiveBp = getBlueprintForVersion(bp, versionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         set({
-          blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, mode: 'canvas',
+          blueprint: bp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases, mode: 'canvas',
           selectedNodeId: null, inspectorOpen: false,
           activeVersionId: versionId, compareMode: false, presentMode: false,
           presentationEditMode: false, activePresentationId: null, currentKeyframeIndex: 0,
@@ -1087,15 +1140,14 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const { phaseColumns } = computeColumnData(blueprint);
+        const effectiveBp = getBlueprintForVersion(blueprint, get().activeVersionId);
+        const { phaseColumns } = computeColumnData(effectiveBp);
         const currentCount = phaseColumns.get(phaseId)?.colCount ?? 1;
         const eff = vRead();
-        const bp = updatedAt(vWrite({
-          ...blueprint,
-          phases: blueprint.phases.map((p) =>
+        const bp = updatedAt(vWrite(blueprint, {
+          phases: (eff.phases ?? []).map((p) =>
             p.id === phaseId ? { ...p, substepCount: currentCount + 1 } : p
           ),
-        }, {
           actions: eff.actions.map((a) =>
             a.phaseId === phaseId && a.order >= atOrder ? { ...a, order: a.order + 1 } : a
           ),
@@ -1254,13 +1306,11 @@ export const useBlueprintStore = create<AppState>()(
         const cleanedOpps = newOpps.map((o) => ({ ...o, actionIds: o.actionIds.filter((aid) => !actorActionIdSet.has(aid)) }));
         const newQuestions = eff.questions.filter((q) => !q.actionIds.every((aid) => actorActionIdSet.has(aid)));
         const cleanedQuestions = newQuestions.map((q) => ({ ...q, actionIds: q.actionIds.filter((aid) => !actorActionIdSet.has(aid)) }));
-        const bp = updatedAt(vWrite({
-          ...blueprint,
-          customEdges: (blueprint.customEdges ?? []).filter(
+        const bp = updatedAt(vWrite(blueprint, {
+          actors: eff.actors.filter((a) => a.id !== id),
+          customEdges: (eff.customEdges ?? []).filter(
             (e) => !actorActionIdSet.has(e.sourceActionId) && !actorActionIdSet.has(e.targetActionId)
           ),
-        }, {
-          actors: eff.actors.filter((a) => a.id !== id),
           actions: eff.actions.filter((a) => a.actorId !== id),
           painPoints: cleanedPainPoints,
           opportunities: cleanedOpps,
@@ -1274,6 +1324,7 @@ export const useBlueprintStore = create<AppState>()(
           rfNodes: nodes,
           rfEdges: edges,
           effectiveActors: effectiveBp.actors,
+          effectivePhases: effectiveBp.phases,
           ...(selectedActorId === id ? { selectedActorId: null, actorPanelOpen: false } : {}),
         });
       },
@@ -1302,15 +1353,17 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const newPhase: Phase = { id: `phase-${Date.now()}`, name, order: blueprint.phases.length };
-        apply(updatedAt({ ...blueprint, phases: [...blueprint.phases, newPhase] }));
+        const eff = vRead();
+        const newPhase: Phase = { id: `phase-${Date.now()}`, name, order: (eff.phases ?? []).length };
+        apply(updatedAt(vWrite(blueprint, { phases: [...(eff.phases ?? []), newPhase] })));
       },
 
       updatePhase: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        apply(updatedAt({ ...blueprint, phases: blueprint.phases.map((p) => p.id === id ? { ...p, ...patch } : p) }));
+        const eff = vRead();
+        apply(updatedAt(vWrite(blueprint, { phases: (eff.phases ?? []).map((p) => p.id === id ? { ...p, ...patch } : p) })));
       },
 
       removePhase: (id) => {
@@ -1319,7 +1372,8 @@ export const useBlueprintStore = create<AppState>()(
         if (!blueprint) return;
         pushHistory();
         const eff = vRead();
-        const { phaseColumns } = computeColumnData(blueprint);
+        const effectiveBp = getBlueprintForVersion(blueprint, activeVersionId);
+        const { phaseColumns } = computeColumnData(effectiveBp);
         const colInfo = phaseColumns.get(id);
         const phaseActionIds = eff.actions.filter((a) => a.phaseId === id).map((a) => a.id);
         const phaseActionIdSet = new Set(phaseActionIds);
@@ -1330,29 +1384,29 @@ export const useBlueprintStore = create<AppState>()(
         const newQuestions = eff.questions.filter((q) => !q.actionIds.every((aid) => phaseActionIdSet.has(aid)));
         const cleanedQuestions = newQuestions.map((q) => ({ ...q, actionIds: q.actionIds.filter((aid) => !phaseActionIdSet.has(aid)) }));
         const laneRemap = colInfo
-          ? applyLaneRemap(blueprint, colInfo.startCol, colInfo.colCount)
-          : { statusLanes: blueprint.statusLanes, timelineLanes: blueprint.timelineLanes };
-        const bp = updatedAt(vWrite({
-          ...blueprint,
-          phases: blueprint.phases.filter((p) => p.id !== id),
-          customEdges: (blueprint.customEdges ?? []).filter(
+          ? applyLaneRemap(effectiveBp, colInfo.startCol, colInfo.colCount)
+          : { statusLanes: eff.statusLanes, timelineLanes: eff.timelineLanes };
+        const bp = updatedAt(vWrite(blueprint, {
+          phases: (eff.phases ?? []).filter((p) => p.id !== id),
+          customEdges: (eff.customEdges ?? []).filter(
             (e) => !phaseActionIdSet.has(e.sourceActionId) && !phaseActionIdSet.has(e.targetActionId)
           ),
           statusLanes: laneRemap.statusLanes,
           timelineLanes: laneRemap.timelineLanes,
-        }, {
           actions: eff.actions.filter((a) => a.phaseId !== id),
           painPoints: cleanedPainPoints,
           opportunities: cleanedOpps,
           questions: cleanedQuestions,
         }));
-        const effectiveBp = getBlueprintForVersion(bp, activeVersionId);
-        const { nodes, edges } = blueprintToFlow(effectiveBp);
+        const newEffectiveBp = getBlueprintForVersion(bp, activeVersionId);
+        const { nodes, edges } = blueprintToFlow(newEffectiveBp);
         saveBlueprint(bp);
         set({
           blueprint: bp,
           rfNodes: nodes,
           rfEdges: edges,
+          effectiveActors: newEffectiveBp.actors,
+          effectivePhases: newEffectiveBp.phases,
           ...(selectedPhaseId === id ? { selectedPhaseId: null, phaseInspectorOpen: false } : {}),
         });
       },
@@ -1361,43 +1415,44 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const sorted = [...blueprint.phases].sort((a, b) => a.order - b.order);
+        const eff = vRead();
+        const phases = eff.phases ?? [];
+        const sorted = [...phases].sort((a, b) => a.order - b.order);
         const idx = sorted.findIndex((p) => p.id === id);
         const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
         if (targetIdx < 0 || targetIdx >= sorted.length) return;
         const phase = sorted[idx];
         const target = sorted[targetIdx];
-        apply(updatedAt({
-          ...blueprint,
-          phases: blueprint.phases.map((p) =>
+        apply(updatedAt(vWrite(blueprint, {
+          phases: phases.map((p) =>
             p.id === phase.id ? { ...p, order: target.order }
             : p.id === target.id ? { ...p, order: phase.order }
             : p
           ),
-        }));
+        })));
       },
 
       movePhaseBoundary: (leftPhaseId, rightPhaseId, direction) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const { phaseColumns } = computeColumnData(blueprint);
+        const eff = vRead();
+        const effectiveBp = getBlueprintForVersion(blueprint, get().activeVersionId);
+        const { phaseColumns } = computeColumnData(effectiveBp);
         const leftCol = phaseColumns.get(leftPhaseId);
         const rightCol = phaseColumns.get(rightPhaseId);
         if (!leftCol || !rightCol) return;
-        const eff = vRead();
+        const phases = eff.phases ?? [];
 
         if (direction === 'left') {
           const maxLeftOrder = leftCol.colCount - 1;
           if (leftCol.colCount <= 1) return;
-          apply(updatedAt(vWrite({
-            ...blueprint,
-            phases: blueprint.phases.map((p) =>
+          apply(updatedAt(vWrite(blueprint, {
+            phases: phases.map((p) =>
               p.id === leftPhaseId ? { ...p, substepCount: leftCol.colCount - 1 }
               : p.id === rightPhaseId ? { ...p, substepCount: rightCol.colCount + 1 }
               : p
             ),
-          }, {
             actions: eff.actions.map((a) => {
               if (a.phaseId === leftPhaseId && a.order === maxLeftOrder)
                 return { ...a, phaseId: rightPhaseId, order: 0 };
@@ -1409,14 +1464,12 @@ export const useBlueprintStore = create<AppState>()(
         } else {
           if (rightCol.colCount <= 1) return;
           const newLeftOrder = leftCol.colCount;
-          apply(updatedAt(vWrite({
-            ...blueprint,
-            phases: blueprint.phases.map((p) =>
+          apply(updatedAt(vWrite(blueprint, {
+            phases: phases.map((p) =>
               p.id === leftPhaseId ? { ...p, substepCount: leftCol.colCount + 1 }
               : p.id === rightPhaseId ? { ...p, substepCount: rightCol.colCount - 1 }
               : p
             ),
-          }, {
             actions: eff.actions.map((a) => {
               if (a.phaseId === rightPhaseId && a.order === 0)
                 return { ...a, phaseId: leftPhaseId, order: newLeftOrder };
@@ -1428,28 +1481,30 @@ export const useBlueprintStore = create<AppState>()(
         }
       },
 
-      // ─── Edges (always on base blueprint, not versioned) ───────────────────
+      // ─── Edges ───────────────────────────────────────────────────────────────
 
       updateEdgeMeta: (edgeId, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const current = blueprint.edgeMeta?.[edgeId] ?? {};
+        const eff = vRead();
+        const current = (eff.edgeMeta ?? {})[edgeId] ?? {};
         const next = { ...current, ...patch };
-        apply(updatedAt({ ...blueprint, edgeMeta: { ...(blueprint.edgeMeta ?? {}), [edgeId]: next } }));
+        apply(updatedAt(vWrite(blueprint, { edgeMeta: { ...(eff.edgeMeta ?? {}), [edgeId]: next } })));
       },
 
       removeEdge: (edgeId) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const isCustom = (blueprint.customEdges ?? []).some((e) => e.id === edgeId);
+        const eff = vRead();
+        const isCustom = (eff.customEdges ?? []).some((e) => e.id === edgeId);
         if (isCustom) {
-          apply(updatedAt({ ...blueprint, customEdges: (blueprint.customEdges ?? []).filter((e) => e.id !== edgeId) }));
+          apply(updatedAt(vWrite(blueprint, { customEdges: (eff.customEdges ?? []).filter((e) => e.id !== edgeId) })));
         } else {
-          const existing = blueprint.removedEdgeIds ?? [];
+          const existing = eff.removedEdgeIds ?? [];
           if (existing.includes(edgeId)) return;
-          apply(updatedAt({ ...blueprint, removedEdgeIds: [...existing, edgeId] }));
+          apply(updatedAt(vWrite(blueprint, { removedEdgeIds: [...existing, edgeId] })));
         }
       },
 
@@ -1457,25 +1512,23 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
+        const eff = vRead();
         const id = `custom-${sourceActionId}-${targetActionId}-${Date.now()}`;
         const ce: CustomEdge = { id, sourceActionId, targetActionId, sourceHandle, targetHandle };
-        apply(updatedAt({ ...blueprint, customEdges: [...(blueprint.customEdges ?? []), ce] }));
+        apply(updatedAt(vWrite(blueprint, { customEdges: [...(eff.customEdges ?? []), ce] })));
       },
 
-      // Reconnect: rewire one endpoint of an existing edge while preserving its
-      // metadata (label, flowType, etc.). Atomic — single history entry.
-      // The new edge gets a fresh `custom-…` id; we copy edgeMeta[old] → [new]
-      // so labels and styling survive the rewire.
       reconnectEdge: (oldEdgeId, sourceActionId, targetActionId, sourceHandle, targetHandle) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
+        const eff = vRead();
 
-        const oldMeta = blueprint.edgeMeta?.[oldEdgeId];
-        const isCustom = (blueprint.customEdges ?? []).some((e) => e.id === oldEdgeId);
+        const oldMeta = (eff.edgeMeta ?? {})[oldEdgeId];
+        const isCustom = (eff.customEdges ?? []).some((e) => e.id === oldEdgeId);
 
-        let nextCustom = blueprint.customEdges ?? [];
-        let nextRemoved = blueprint.removedEdgeIds ?? [];
+        let nextCustom = eff.customEdges ?? [];
+        let nextRemoved = eff.removedEdgeIds ?? [];
         if (isCustom) {
           nextCustom = nextCustom.filter((e) => e.id !== oldEdgeId);
         } else if (!nextRemoved.includes(oldEdgeId)) {
@@ -1486,16 +1539,15 @@ export const useBlueprintStore = create<AppState>()(
         const ce: CustomEdge = { id: newId, sourceActionId, targetActionId, sourceHandle, targetHandle };
         nextCustom = [...nextCustom, ce];
 
-        const nextEdgeMeta = { ...(blueprint.edgeMeta ?? {}) };
+        const nextEdgeMeta = { ...(eff.edgeMeta ?? {}) };
         delete nextEdgeMeta[oldEdgeId];
         if (oldMeta) nextEdgeMeta[newId] = oldMeta;
 
-        apply(updatedAt({
-          ...blueprint,
+        apply(updatedAt(vWrite(blueprint, {
           customEdges: nextCustom,
           removedEdgeIds: nextRemoved,
           edgeMeta: nextEdgeMeta,
-        }));
+        })));
       },
 
       // ─── Touchpoint tags ────────────────────────────────────────────────────
@@ -1506,9 +1558,10 @@ export const useBlueprintStore = create<AppState>()(
         pushHistory();
         const trimmed = name.trim();
         if (!trimmed) return;
-        const existing = blueprint.touchpointTags ?? [];
+        const eff = vRead();
+        const existing = eff.touchpointTags ?? [];
         if (existing.includes(trimmed)) return;
-        apply(updatedAt({ ...blueprint, touchpointTags: [...existing, trimmed] }));
+        apply(updatedAt(vWrite(blueprint, { touchpointTags: [...existing, trimmed] })));
       },
 
       removeTouchpointTag: (name) => {
@@ -1516,10 +1569,8 @@ export const useBlueprintStore = create<AppState>()(
         if (!blueprint) return;
         pushHistory();
         const eff = vRead();
-        apply(updatedAt(vWrite({
-          ...blueprint,
-          touchpointTags: (blueprint.touchpointTags ?? []).filter((t) => t !== name),
-        }, {
+        apply(updatedAt(vWrite(blueprint, {
+          touchpointTags: (eff.touchpointTags ?? []).filter((t) => t !== name),
           actions: eff.actions.map((a) => ({
             ...a,
             touchpointLabels: (a.touchpointLabels ?? []).filter((t) => t !== name),
@@ -1558,16 +1609,28 @@ export const useBlueprintStore = create<AppState>()(
           id,
           name,
           actors: [...eff.actors],
+          phases: [...eff.phases],
           actions: [...eff.actions],
           painPoints: [...eff.painPoints],
           opportunities: [...eff.opportunities],
           questions: [...eff.questions],
+          edgeMeta: eff.edgeMeta ? { ...eff.edgeMeta } : undefined,
+          removedEdgeIds: eff.removedEdgeIds ? [...eff.removedEdgeIds] : undefined,
+          customEdges: eff.customEdges ? [...eff.customEdges] : undefined,
+          touchpointTags: eff.touchpointTags ? [...eff.touchpointTags] : undefined,
+          overviewActionIds: eff.overviewActionIds ? [...eff.overviewActionIds] : undefined,
+          overviewCellDescriptions: eff.overviewCellDescriptions ? { ...eff.overviewCellDescriptions } : undefined,
+          statusLanes: eff.statusLanes ? eff.statusLanes.map((l) => ({ ...l, segments: [...l.segments] })) : undefined,
+          timelineLanes: eff.timelineLanes ? eff.timelineLanes.map((l) => ({ ...l, segments: [...l.segments] })) : undefined,
+          storyboards: eff.storyboards ? eff.storyboards.map((s) => ({ ...s, frames: [...s.frames] })) : undefined,
+          frameworkAxes: eff.frameworkAxes ? eff.frameworkAxes.map((a) => ({ ...a, cardPositions: { ...a.cardPositions } })) : undefined,
+          frameworks: eff.frameworks ? [...eff.frameworks] : undefined,
         };
         const newBp = updatedAt({ ...blueprint, versions: [...(blueprint.versions ?? []), newVersion], activeVersionId: id });
         const effectiveBp = getBlueprintForVersion(newBp, id);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         saveBlueprint(newBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, activeVersionId: id });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases, activeVersionId: id });
       },
 
       switchVersion: (versionId) => {
@@ -1577,7 +1640,7 @@ export const useBlueprintStore = create<AppState>()(
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         const newBp = { ...blueprint, activeVersionId: versionId };
         saveBlueprint(newBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, activeVersionId: versionId });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases, activeVersionId: versionId });
       },
 
       deleteVersion: (versionId) => {
@@ -1594,7 +1657,7 @@ export const useBlueprintStore = create<AppState>()(
         const effectiveBp = getBlueprintForVersion(newBp, newActiveId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
         saveBlueprint(newBp);
-        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, activeVersionId: newActiveId, compareVersionIds: newCompareIds });
+        set({ blueprint: newBp, rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases, activeVersionId: newActiveId, compareVersionIds: newCompareIds });
       },
 
       renameVersion: (versionId, name) => {
@@ -1826,6 +1889,7 @@ export const useBlueprintStore = create<AppState>()(
           updates.rfNodes = nodes;
           updates.rfEdges = edges;
           updates.effectiveActors = effectiveBp.actors;
+          updates.effectivePhases = effectiveBp.phases;
         }
 
         set(updates as Partial<AppState>);
@@ -1887,7 +1951,7 @@ export const useBlueprintStore = create<AppState>()(
         if (!blueprint) return;
         const effectiveBp = getBlueprintForVersion(blueprint, activeVersionId);
         const { nodes, edges } = blueprintToFlow(effectiveBp);
-        set({ rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors });
+        set({ rfNodes: nodes, rfEdges: edges, effectiveActors: effectiveBp.actors, effectivePhases: effectiveBp.phases });
       },
 
       setLightboxUrl: (url) => set({ lightboxUrl: url }),
@@ -1902,19 +1966,18 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const { phaseColumns } = computeColumnData(blueprint);
+        const effectiveBp = getBlueprintForVersion(blueprint, get().activeVersionId);
+        const { phaseColumns } = computeColumnData(effectiveBp);
         const col = phaseColumns.get(phaseId);
         if (!col || col.colCount <= 1) return;
         const eff = vRead();
-        const laneRemap = applyLaneRemap(blueprint, col.startCol + order, 1);
-        apply(updatedAt(vWrite({
-          ...blueprint,
-          phases: blueprint.phases.map((p) =>
+        const laneRemap = applyLaneRemap(effectiveBp, col.startCol + order, 1);
+        apply(updatedAt(vWrite(blueprint, {
+          phases: (eff.phases ?? []).map((p) =>
             p.id === phaseId ? { ...p, substepCount: col.colCount - 1 } : p
           ),
           statusLanes: laneRemap.statusLanes,
           timelineLanes: laneRemap.timelineLanes,
-        }, {
           actions: eff.actions
             .filter((a) => !(a.phaseId === phaseId && a.order === order))
             .map((a) => a.phaseId === phaseId && a.order > order ? { ...a, order: a.order - 1 } : a),
@@ -1925,7 +1988,8 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const { phaseColumns } = computeColumnData(blueprint);
+        const effectiveBp = getBlueprintForVersion(blueprint, get().activeVersionId);
+        const { phaseColumns } = computeColumnData(effectiveBp);
         const col = phaseColumns.get(phaseId);
         if (!col) return;
         const toOrder = direction === 'left' ? fromOrder - 1 : fromOrder + 1;
@@ -1965,7 +2029,8 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const lanes = blueprint.statusLanes ?? [];
+        const eff = vRead();
+        const lanes = eff.statusLanes ?? [];
         const palette = ['#3B82F6', '#14B8A6', '#F59E0B', '#8B5CF6', '#EC4899', '#10B981'];
         const lane: StatusLane = {
           id: `slane-${Date.now()}`,
@@ -1975,31 +2040,34 @@ export const useBlueprintStore = create<AppState>()(
           visible: true,
           segments: [],
         };
-        apply(updatedAt({ ...blueprint, statusLanes: [...lanes, lane] }));
+        apply(updatedAt(vWrite(blueprint, { statusLanes: [...lanes, lane] })));
       },
 
       updateStatusLane: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const lanes = (blueprint.statusLanes ?? []).map((l) => l.id === id ? { ...l, ...patch } : l);
-        apply(updatedAt({ ...blueprint, statusLanes: lanes }));
+        const eff = vRead();
+        const lanes = (eff.statusLanes ?? []).map((l) => l.id === id ? { ...l, ...patch } : l);
+        apply(updatedAt(vWrite(blueprint, { statusLanes: lanes })));
       },
 
       removeStatusLane: (id) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const lanes = (blueprint.statusLanes ?? [])
+        const eff = vRead();
+        const lanes = (eff.statusLanes ?? [])
           .filter((l) => l.id !== id)
           .map((l, i) => ({ ...l, order: i }));
-        apply(updatedAt({ ...blueprint, statusLanes: lanes }));
+        apply(updatedAt(vWrite(blueprint, { statusLanes: lanes })));
       },
 
       reorderStatusLane: (id, direction) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const sorted = [...(blueprint.statusLanes ?? [])].sort((a, b) => a.order - b.order);
+        const eff = vRead();
+        const sorted = [...(eff.statusLanes ?? [])].sort((a, b) => a.order - b.order);
         const idx = sorted.findIndex((l) => l.id === id);
         if (idx === -1) return;
         const swap = direction === 'up' ? idx - 1 : idx + 1;
@@ -2007,45 +2075,47 @@ export const useBlueprintStore = create<AppState>()(
         pushHistory();
         [sorted[idx], sorted[swap]] = [sorted[swap], sorted[idx]];
         const reordered = sorted.map((l, i) => ({ ...l, order: i }));
-        apply(updatedAt({ ...blueprint, statusLanes: reordered }));
+        apply(updatedAt(vWrite(blueprint, { statusLanes: reordered })));
       },
 
       addStatusSegment: (laneId, startCol, endCol, label) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const lane = (blueprint.statusLanes ?? []).find((l) => l.id === laneId);
+        const eff = vRead();
+        const lane = (eff.statusLanes ?? []).find((l) => l.id === laneId);
         if (!lane) return;
-        // Skip if any column in the requested range overlaps an existing segment
         const overlaps = lane.segments.some((s) => !(endCol < s.startCol || startCol > s.endCol));
         if (overlaps) return;
         pushHistory();
         const seg: LaneSegment = { id: `sseg-${Date.now()}`, label: label ?? '', startCol, endCol };
-        const lanes = (blueprint.statusLanes ?? []).map((l) =>
+        const lanes = (eff.statusLanes ?? []).map((l) =>
           l.id === laneId ? { ...l, segments: [...l.segments, seg] } : l
         );
-        apply(updatedAt({ ...blueprint, statusLanes: lanes }));
+        apply(updatedAt(vWrite(blueprint, { statusLanes: lanes })));
       },
 
       updateStatusSegment: (laneId, segmentId, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const lanes = (blueprint.statusLanes ?? []).map((l) =>
+        const eff = vRead();
+        const lanes = (eff.statusLanes ?? []).map((l) =>
           l.id === laneId
             ? { ...l, segments: l.segments.map((s) => s.id === segmentId ? { ...s, ...patch } : s) }
             : l
         );
-        apply(updatedAt({ ...blueprint, statusLanes: lanes }));
+        apply(updatedAt(vWrite(blueprint, { statusLanes: lanes })));
       },
 
       removeStatusSegment: (laneId, segmentId) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const lanes = (blueprint.statusLanes ?? []).map((l) =>
+        const eff = vRead();
+        const lanes = (eff.statusLanes ?? []).map((l) =>
           l.id === laneId ? { ...l, segments: l.segments.filter((s) => s.id !== segmentId) } : l
         );
-        apply(updatedAt({ ...blueprint, statusLanes: lanes }));
+        apply(updatedAt(vWrite(blueprint, { statusLanes: lanes })));
       },
 
       // ─── Timeline lanes ────────────────────────────────────────────────────
@@ -2054,7 +2124,8 @@ export const useBlueprintStore = create<AppState>()(
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const lanes = blueprint.timelineLanes ?? [];
+        const eff = vRead();
+        const lanes = eff.timelineLanes ?? [];
         const lane: TimelineLane = {
           id: `tlane-${Date.now()}`,
           name,
@@ -2063,31 +2134,34 @@ export const useBlueprintStore = create<AppState>()(
           visible: true,
           segments: [],
         };
-        apply(updatedAt({ ...blueprint, timelineLanes: [...lanes, lane] }));
+        apply(updatedAt(vWrite(blueprint, { timelineLanes: [...lanes, lane] })));
       },
 
       updateTimelineLane: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const lanes = (blueprint.timelineLanes ?? []).map((l) => l.id === id ? { ...l, ...patch } : l);
-        apply(updatedAt({ ...blueprint, timelineLanes: lanes }));
+        const eff = vRead();
+        const lanes = (eff.timelineLanes ?? []).map((l) => l.id === id ? { ...l, ...patch } : l);
+        apply(updatedAt(vWrite(blueprint, { timelineLanes: lanes })));
       },
 
       removeTimelineLane: (id) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const lanes = (blueprint.timelineLanes ?? [])
+        const eff = vRead();
+        const lanes = (eff.timelineLanes ?? [])
           .filter((l) => l.id !== id)
           .map((l, i) => ({ ...l, order: i }));
-        apply(updatedAt({ ...blueprint, timelineLanes: lanes }));
+        apply(updatedAt(vWrite(blueprint, { timelineLanes: lanes })));
       },
 
       reorderTimelineLane: (id, direction) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const sorted = [...(blueprint.timelineLanes ?? [])].sort((a, b) => a.order - b.order);
+        const eff = vRead();
+        const sorted = [...(eff.timelineLanes ?? [])].sort((a, b) => a.order - b.order);
         const idx = sorted.findIndex((l) => l.id === id);
         if (idx === -1) return;
         const swap = direction === 'up' ? idx - 1 : idx + 1;
@@ -2095,44 +2169,47 @@ export const useBlueprintStore = create<AppState>()(
         pushHistory();
         [sorted[idx], sorted[swap]] = [sorted[swap], sorted[idx]];
         const reordered = sorted.map((l, i) => ({ ...l, order: i }));
-        apply(updatedAt({ ...blueprint, timelineLanes: reordered }));
+        apply(updatedAt(vWrite(blueprint, { timelineLanes: reordered })));
       },
 
       addTimelineSegment: (laneId, startCol, endCol, label) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const lane = (blueprint.timelineLanes ?? []).find((l) => l.id === laneId);
+        const eff = vRead();
+        const lane = (eff.timelineLanes ?? []).find((l) => l.id === laneId);
         if (!lane) return;
         const overlaps = lane.segments.some((s) => !(endCol < s.startCol || startCol > s.endCol));
         if (overlaps) return;
         pushHistory();
         const seg: LaneSegment = { id: `tseg-${Date.now()}`, label: label ?? '', startCol, endCol };
-        const lanes = (blueprint.timelineLanes ?? []).map((l) =>
+        const lanes = (eff.timelineLanes ?? []).map((l) =>
           l.id === laneId ? { ...l, segments: [...l.segments, seg] } : l
         );
-        apply(updatedAt({ ...blueprint, timelineLanes: lanes }));
+        apply(updatedAt(vWrite(blueprint, { timelineLanes: lanes })));
       },
 
       updateTimelineSegment: (laneId, segmentId, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const lanes = (blueprint.timelineLanes ?? []).map((l) =>
+        const eff = vRead();
+        const lanes = (eff.timelineLanes ?? []).map((l) =>
           l.id === laneId
             ? { ...l, segments: l.segments.map((s) => s.id === segmentId ? { ...s, ...patch } : s) }
             : l
         );
-        apply(updatedAt({ ...blueprint, timelineLanes: lanes }));
+        apply(updatedAt(vWrite(blueprint, { timelineLanes: lanes })));
       },
 
       removeTimelineSegment: (laneId, segmentId) => {
         const { blueprint } = get();
         if (!blueprint) return;
         pushHistory();
-        const lanes = (blueprint.timelineLanes ?? []).map((l) =>
+        const eff = vRead();
+        const lanes = (eff.timelineLanes ?? []).map((l) =>
           l.id === laneId ? { ...l, segments: l.segments.filter((s) => s.id !== segmentId) } : l
         );
-        apply(updatedAt({ ...blueprint, timelineLanes: lanes }));
+        apply(updatedAt(vWrite(blueprint, { timelineLanes: lanes })));
       },
 
       // ─── Lane segment selection + live drag ────────────────────────────────
@@ -2212,9 +2289,9 @@ export const useBlueprintStore = create<AppState>()(
         try {
           const eff = vRead();
           const actorMap = new Map(eff.actors.map((a) => [a.id, a.name]));
-          const phaseMap = new Map(blueprint.phases.map((p) => [p.id, p.name]));
+          const phaseMap = new Map((eff.phases ?? []).map((p) => [p.id, p.name]));
 
-          const actionsJson = blueprint.actions.map((a) => ({
+          const actionsJson = eff.actions.map((a) => ({
             id: a.id,
             actor: actorMap.get(a.actorId) ?? a.actorId,
             phase: phaseMap.get(a.phaseId) ?? a.phaseId,
@@ -2256,10 +2333,13 @@ Return ONLY a JSON object in this exact format:
 
           // Update labelAbstract on the matching actions and save overviewActionIds
           const labelMap = new Map(parsed.selected.map((s) => [s.id, s.labelAbstract]));
-          const updatedActions = blueprint.actions.map((a) =>
+          const eff2 = vRead();
+          const updatedActions = eff2.actions.map((a) =>
             labelMap.has(a.id) ? { ...a, labelAbstract: labelMap.get(a.id) ?? a.labelAbstract } : a
           );
-          const newBp = updatedAt({ ...blueprint, actions: updatedActions, overviewActionIds: selectedIds });
+          const { blueprint: bp2 } = get();
+          if (!bp2) return;
+          const newBp = updatedAt(vWrite(bp2, { actions: updatedActions, overviewActionIds: selectedIds }));
           saveBlueprint(newBp);
           set({ blueprint: newBp, overviewGenerating: false });
 
@@ -2274,8 +2354,9 @@ Return ONLY a JSON object in this exact format:
         set({ selectedOverviewCell: { actorId, phaseId, actionId } });
         const { blueprint } = get();
         if (!blueprint) return;
+        const eff = vRead();
         const key = `${actorId}-${phaseId}`;
-        if (!blueprint.overviewCellDescriptions?.[key]) {
+        if (!(eff.overviewCellDescriptions ?? {})[key]) {
           get().generateCellDescription(actorId, phaseId);
         }
       },
@@ -2285,11 +2366,11 @@ Return ONLY a JSON object in this exact format:
       updateCellDescription: (actorId, phaseId, text) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        const eff = vRead();
         const key = `${actorId}-${phaseId}`;
-        const newBp = updatedAt({
-          ...blueprint,
-          overviewCellDescriptions: { ...(blueprint.overviewCellDescriptions ?? {}), [key]: text },
-        });
+        const newBp = updatedAt(vWrite(blueprint, {
+          overviewCellDescriptions: { ...(eff.overviewCellDescriptions ?? {}), [key]: text },
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2302,10 +2383,10 @@ Return ONLY a JSON object in this exact format:
         try {
           const eff = vRead();
           const actor = eff.actors.find((a) => a.id === actorId);
-          const phase = blueprint.phases.find((p) => p.id === phaseId);
+          const phase = (eff.phases ?? []).find((p) => p.id === phaseId);
           if (!actor || !phase) { set({ overviewCellGenerating: false }); return; }
 
-          const cellActions = blueprint.actions
+          const cellActions = eff.actions
             .filter((a) => a.actorId === actorId && a.phaseId === phaseId)
             .sort((a, b) => a.order - b.order);
 
@@ -2329,10 +2410,12 @@ Return ONLY a JSON object in this exact format:
           if (!text || !text.text) throw new Error('No text response');
 
           const key = `${actorId}-${phaseId}`;
-          const newBp = updatedAt({
-            ...blueprint,
-            overviewCellDescriptions: { ...(blueprint.overviewCellDescriptions ?? {}), [key]: text.text.trim() },
-          });
+          const { blueprint: bp2 } = get();
+          if (!bp2) return;
+          const eff2 = vRead();
+          const newBp = updatedAt(vWrite(bp2, {
+            overviewCellDescriptions: { ...(eff2.overviewCellDescriptions ?? {}), [key]: text.text.trim() },
+          }));
           saveBlueprint(newBp);
           set({ blueprint: newBp, overviewCellGenerating: false });
         } catch {
@@ -2352,6 +2435,7 @@ Return ONLY a JSON object in this exact format:
       createStoryboard: (name) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        const eff = vRead();
         const id = `sb-${Date.now()}`;
         const sb: Storyboard = {
           id,
@@ -2361,7 +2445,7 @@ Return ONLY a JSON object in this exact format:
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        const newBp = updatedAt({ ...blueprint, storyboards: [...(blueprint.storyboards ?? []), sb] });
+        const newBp = updatedAt(vWrite(blueprint, { storyboards: [...(eff.storyboards ?? []), sb] }));
         saveBlueprint(newBp);
         set({ blueprint: newBp, activeStoryboardId: id });
       },
@@ -2369,9 +2453,11 @@ Return ONLY a JSON object in this exact format:
       deleteStoryboard: (id) => {
         const { blueprint, activeStoryboardId } = get();
         if (!blueprint) return;
-        const newBp = updatedAt({ ...blueprint, storyboards: (blueprint.storyboards ?? []).filter((s) => s.id !== id) });
+        const eff = vRead();
+        const newStoryboards = (eff.storyboards ?? []).filter((s) => s.id !== id);
+        const newBp = updatedAt(vWrite(blueprint, { storyboards: newStoryboards }));
         saveBlueprint(newBp);
-        const newActiveId = activeStoryboardId === id ? ((newBp.storyboards ?? [])[0]?.id ?? null) : activeStoryboardId;
+        const newActiveId = activeStoryboardId === id ? (newStoryboards[0]?.id ?? null) : activeStoryboardId;
         set({ blueprint: newBp, activeStoryboardId: newActiveId });
       },
 
@@ -2380,14 +2466,14 @@ Return ONLY a JSON object in this exact format:
       updateStoryboardFrame: (storyboardId, frameId, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const newBp = updatedAt({
-          ...blueprint,
-          storyboards: (blueprint.storyboards ?? []).map((s) =>
+        const eff = vRead();
+        const newBp = updatedAt(vWrite(blueprint, {
+          storyboards: (eff.storyboards ?? []).map((s) =>
             s.id === storyboardId
               ? { ...s, frames: s.frames.map((f) => f.id === frameId ? { ...f, ...patch } : f), updatedAt: new Date().toISOString() }
               : s
           ),
-        });
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2395,17 +2481,17 @@ Return ONLY a JSON object in this exact format:
       updateStoryboardStyleGuide: (storyboardId, guide) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const newBp = updatedAt({
-          ...blueprint,
-          storyboards: (blueprint.storyboards ?? []).map((s) => {
+        const eff = vRead();
+        const newBp = updatedAt(vWrite(blueprint, {
+          storyboards: (eff.storyboards ?? []).map((s) => {
             if (s.id !== storyboardId) return s;
             const frames = s.frames.map((f) => ({
               ...f,
-              imagePrompt: buildImagePrompt(f, guide, vRead().actors),
+              imagePrompt: buildImagePrompt(f, guide, eff.actors),
             }));
             return { ...s, styleGuide: guide, frames, updatedAt: new Date().toISOString() };
           }),
-        });
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2413,7 +2499,8 @@ Return ONLY a JSON object in this exact format:
       addBlankStoryboardFrame: (storyboardId) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const sb = (blueprint.storyboards ?? []).find((s) => s.id === storyboardId);
+        const eff = vRead();
+        const sb = (eff.storyboards ?? []).find((s) => s.id === storyboardId);
         if (!sb) return;
         const newFrame: StoryboardFrame = {
           id: `frame-${Date.now()}`,
@@ -2422,17 +2509,16 @@ Return ONLY a JSON object in this exact format:
           imagePrompt: '',
           caption: 'New scene',
           phaseIds: [],
-          actorIds: vRead().actors.map((a) => a.id),
+          actorIds: eff.actors.map((a) => a.id),
           imageUrl: undefined,
         };
-        const newBp = updatedAt({
-          ...blueprint,
-          storyboards: (blueprint.storyboards ?? []).map((s) =>
+        const newBp = updatedAt(vWrite(blueprint, {
+          storyboards: (eff.storyboards ?? []).map((s) =>
             s.id === storyboardId
               ? { ...s, frames: [...s.frames, newFrame], updatedAt: new Date().toISOString() }
               : s
           ),
-        });
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2440,14 +2526,14 @@ Return ONLY a JSON object in this exact format:
       deleteStoryboardFrame: (storyboardId, frameId) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const newBp = updatedAt({
-          ...blueprint,
-          storyboards: (blueprint.storyboards ?? []).map((s) =>
+        const eff = vRead();
+        const newBp = updatedAt(vWrite(blueprint, {
+          storyboards: (eff.storyboards ?? []).map((s) =>
             s.id === storyboardId
               ? { ...s, frames: s.frames.filter((f) => f.id !== frameId).map((f, i) => ({ ...f, order: i })), updatedAt: new Date().toISOString() }
               : s
           ),
-        });
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2460,7 +2546,8 @@ Return ONLY a JSON object in this exact format:
         try {
           // Ensure we have an active storyboard
           let sbId = activeStoryboardId;
-          if (!sbId || !(blueprint.storyboards ?? []).find((s) => s.id === sbId)) {
+          const eff = vRead();
+          if (!sbId || !(eff.storyboards ?? []).find((s) => s.id === sbId)) {
             const id = `sb-${Date.now()}`;
             const newSb: Storyboard = {
               id,
@@ -2470,7 +2557,7 @@ Return ONLY a JSON object in this exact format:
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };
-            const initBp = updatedAt({ ...blueprint, storyboards: [...(blueprint.storyboards ?? []), newSb] });
+            const initBp = updatedAt(vWrite(blueprint, { storyboards: [...(eff.storyboards ?? []), newSb] }));
             saveBlueprint(initBp);
             set({ blueprint: initBp, activeStoryboardId: id });
             sbId = id;
@@ -2478,40 +2565,42 @@ Return ONLY a JSON object in this exact format:
 
           const { blueprint: currentBp } = get();
           if (!currentBp || !sbId) return;
-          const sb = (currentBp.storyboards ?? []).find((s) => s.id === sbId)!;
+          const eff2 = vRead();
+          const sb = (eff2.storyboards ?? []).find((s) => s.id === sbId)!;
+          const effectiveBp = getBlueprintForVersion(currentBp, get().activeVersionId);
 
           // 1. Generate style guide (character descriptions)
-          const styleGuide = await generateStyleGuide(currentBp, sb.styleGuide.baseStyle);
-          const bpAfterStyle = updatedAt({
-            ...currentBp,
-            storyboards: (currentBp.storyboards ?? []).map((s) =>
+          const styleGuide = await generateStyleGuide(effectiveBp, sb.styleGuide.baseStyle);
+          const eff3 = vRead();
+          const bpAfterStyle = updatedAt(vWrite(get().blueprint!, {
+            storyboards: (eff3.storyboards ?? []).map((s) =>
               s.id === sbId ? { ...s, styleGuide } : s
             ),
-          });
+          }));
           saveBlueprint(bpAfterStyle);
           set({ blueprint: bpAfterStyle });
 
           // 2. Generate frame structure (scenes + captions, no images yet)
-          const rawFrames = await generateFrameStructure(currentBp, styleGuide);
+          const rawFrames = await generateFrameStructure(effectiveBp, styleGuide);
 
           // Add image prompts and assign IDs
           const framesWithPrompts: StoryboardFrame[] = rawFrames.map((f, i) => ({
             ...f,
             id: `frame-${Date.now()}-${i}`,
             order: i,
-            imagePrompt: buildImagePrompt(f, styleGuide, currentBp.actors),
+            imagePrompt: buildImagePrompt(f, styleGuide, eff2.actors),
             imageUrl: undefined,
           }));
 
           // Save frames (no images yet)
           const { blueprint: bp2 } = get();
           if (!bp2) return;
-          const bpWithFrames = updatedAt({
-            ...bp2,
-            storyboards: (bp2.storyboards ?? []).map((s) =>
+          const eff4 = vRead();
+          const bpWithFrames = updatedAt(vWrite(bp2, {
+            storyboards: (eff4.storyboards ?? []).map((s) =>
               s.id === sbId ? { ...s, styleGuide, frames: framesWithPrompts, updatedAt: new Date().toISOString() } : s
             ),
-          });
+          }));
           saveBlueprint(bpWithFrames);
           set({ blueprint: bpWithFrames });
 
@@ -2522,14 +2611,14 @@ Return ONLY a JSON object in this exact format:
             if (imageUrl) {
               const { blueprint: bp3 } = get();
               if (!bp3) break;
-              const bpImg = updatedAt({
-                ...bp3,
-                storyboards: (bp3.storyboards ?? []).map((s) =>
+              const eff5 = vRead();
+              const bpImg = updatedAt(vWrite(bp3, {
+                storyboards: (eff5.storyboards ?? []).map((s) =>
                   s.id === sbId
                     ? { ...s, frames: s.frames.map((f) => f.id === frame.id ? { ...f, imageUrl } : f), updatedAt: new Date().toISOString() }
                     : s
                 ),
-              });
+              }));
               saveBlueprint(bpImg);
               set({ blueprint: bpImg });
             }
@@ -2544,18 +2633,18 @@ Return ONLY a JSON object in this exact format:
       reorderStoryboardFrames: (storyboardId, fromIdx, toIdx) => {
         const { blueprint } = get();
         if (!blueprint || fromIdx === toIdx) return;
-        const sb = (blueprint.storyboards ?? []).find((s) => s.id === storyboardId);
+        const eff = vRead();
+        const sb = (eff.storyboards ?? []).find((s) => s.id === storyboardId);
         if (!sb) return;
         const frames = [...sb.frames];
         const [moved] = frames.splice(fromIdx, 1);
         frames.splice(toIdx, 0, moved);
         const reordered = frames.map((f, i) => ({ ...f, order: i }));
-        const newBp = updatedAt({
-          ...blueprint,
-          storyboards: (blueprint.storyboards ?? []).map((s) =>
+        const newBp = updatedAt(vWrite(blueprint, {
+          storyboards: (eff.storyboards ?? []).map((s) =>
             s.id === storyboardId ? { ...s, frames: reordered, updatedAt: new Date().toISOString() } : s
           ),
-        });
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2563,7 +2652,8 @@ Return ONLY a JSON object in this exact format:
       regenerateFrame: async (storyboardId, frameId) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const sb = (blueprint.storyboards ?? []).find((s) => s.id === storyboardId);
+        const eff = vRead();
+        const sb = (eff.storyboards ?? []).find((s) => s.id === storyboardId);
         const frame = sb?.frames.find((f) => f.id === frameId);
         if (!sb || !frame) return;
 
@@ -2573,14 +2663,14 @@ Return ONLY a JSON object in this exact format:
           if (imageUrl) {
             const { blueprint: bp2 } = get();
             if (!bp2) return;
-            const newBp = updatedAt({
-              ...bp2,
-              storyboards: (bp2.storyboards ?? []).map((s) =>
+            const eff2 = vRead();
+            const newBp = updatedAt(vWrite(bp2, {
+              storyboards: (eff2.storyboards ?? []).map((s) =>
                 s.id === storyboardId
                   ? { ...s, frames: s.frames.map((f) => f.id === frameId ? { ...f, imageUrl } : f), updatedAt: new Date().toISOString() }
                   : s
               ),
-            });
+            }));
             saveBlueprint(newBp);
             set({ blueprint: newBp });
           }
@@ -2592,7 +2682,8 @@ Return ONLY a JSON object in this exact format:
       regenerateAllFrames: async (storyboardId) => {
         const { blueprint, storyboardGenerating } = get();
         if (!blueprint || storyboardGenerating) return;
-        const sb = (blueprint.storyboards ?? []).find((s) => s.id === storyboardId);
+        const eff = vRead();
+        const sb = (eff.storyboards ?? []).find((s) => s.id === storyboardId);
         if (!sb || sb.frames.length === 0) return;
 
         set({ storyboardGenerating: true });
@@ -2603,14 +2694,14 @@ Return ONLY a JSON object in this exact format:
             if (imageUrl) {
               const { blueprint: bp2 } = get();
               if (!bp2) break;
-              const newBp = updatedAt({
-                ...bp2,
-                storyboards: (bp2.storyboards ?? []).map((s) =>
+              const eff2 = vRead();
+              const newBp = updatedAt(vWrite(bp2, {
+                storyboards: (eff2.storyboards ?? []).map((s) =>
                   s.id === storyboardId
                     ? { ...s, frames: s.frames.map((f) => f.id === frame.id ? { ...f, imageUrl } : f), updatedAt: new Date().toISOString() }
                     : s
                 ),
-              });
+              }));
               saveBlueprint(newBp);
               set({ blueprint: newBp });
             }
@@ -2641,7 +2732,8 @@ Return ONLY a JSON object in this exact format:
             const eff2 = vRead();
             const newBp = updatedAt(vWrite(bp2, { actors: eff2.actors.map((a) => a.id === actorId ? { ...a, portraitUrl: url } : a) }));
             saveBlueprint(newBp);
-            set({ blueprint: newBp, effectiveActors: getBlueprintForVersion(newBp, get().activeVersionId).actors });
+            const effBp = getBlueprintForVersion(newBp, get().activeVersionId);
+            set({ blueprint: newBp, effectiveActors: effBp.actors, effectivePhases: effBp.phases });
           }
         } finally {
           set({ actorPortraitGenerating: null });
@@ -2663,9 +2755,10 @@ Return ONLY a JSON object in this exact format:
       addFrameworkAxis: (title, lowLabel, highLabel) => {
         const { blueprint } = get();
         if (!blueprint) return '';
+        const eff = vRead();
         const id = `axis-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const axis: FrameworkAxis = { id, title, lowLabel, highLabel, cardPositions: {} };
-        const newBp = updatedAt({ ...blueprint, frameworkAxes: [...(blueprint.frameworkAxes ?? []), axis] });
+        const newBp = updatedAt(vWrite(blueprint, { frameworkAxes: [...(eff.frameworkAxes ?? []), axis] }));
         saveBlueprint(newBp);
         set({ blueprint: newBp, activeAxisId: id });
         return id;
@@ -2674,10 +2767,10 @@ Return ONLY a JSON object in this exact format:
       updateFrameworkAxis: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const newBp = updatedAt({
-          ...blueprint,
-          frameworkAxes: (blueprint.frameworkAxes ?? []).map((a) => a.id === id ? { ...a, ...patch } : a),
-        });
+        const eff = vRead();
+        const newBp = updatedAt(vWrite(blueprint, {
+          frameworkAxes: (eff.frameworkAxes ?? []).map((a) => a.id === id ? { ...a, ...patch } : a),
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2685,15 +2778,14 @@ Return ONLY a JSON object in this exact format:
       removeFrameworkAxis: (id) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const newBp = updatedAt({
-          ...blueprint,
-          frameworkAxes: (blueprint.frameworkAxes ?? []).filter((a) => a.id !== id),
-          // Remove axis from any frameworks that reference it
-          frameworks: (blueprint.frameworks ?? []).map((f) => ({
+        const eff = vRead();
+        const newBp = updatedAt(vWrite(blueprint, {
+          frameworkAxes: (eff.frameworkAxes ?? []).filter((a) => a.id !== id),
+          frameworks: (eff.frameworks ?? []).map((f) => ({
             ...f,
             axisIds: f.axisIds.filter((aId) => aId !== id),
           })).filter((f) => f.axisIds.length >= 2),
-        });
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2701,9 +2793,10 @@ Return ONLY a JSON object in this exact format:
       addFramework: (name, axisIds, mode) => {
         const { blueprint } = get();
         if (!blueprint) return '';
+        const eff = vRead();
         const id = `fw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const framework: Framework = { id, name, axisIds, mode };
-        const newBp = updatedAt({ ...blueprint, frameworks: [...(blueprint.frameworks ?? []), framework] });
+        const newBp = updatedAt(vWrite(blueprint, { frameworks: [...(eff.frameworks ?? []), framework] }));
         saveBlueprint(newBp);
         set({ blueprint: newBp, activeFrameworkId: id });
         return id;
@@ -2712,10 +2805,10 @@ Return ONLY a JSON object in this exact format:
       updateFramework: (id, patch) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const newBp = updatedAt({
-          ...blueprint,
-          frameworks: (blueprint.frameworks ?? []).map((f) => f.id === id ? { ...f, ...patch } : f),
-        });
+        const eff = vRead();
+        const newBp = updatedAt(vWrite(blueprint, {
+          frameworks: (eff.frameworks ?? []).map((f) => f.id === id ? { ...f, ...patch } : f),
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2723,26 +2816,25 @@ Return ONLY a JSON object in this exact format:
       removeFramework: (id) => {
         const { blueprint, activeFrameworkId } = get();
         if (!blueprint) return;
-        const newBp = updatedAt({
-          ...blueprint,
-          frameworks: (blueprint.frameworks ?? []).filter((f) => f.id !== id),
-        });
+        const eff = vRead();
+        const newFrameworks = (eff.frameworks ?? []).filter((f) => f.id !== id);
+        const newBp = updatedAt(vWrite(blueprint, { frameworks: newFrameworks }));
         saveBlueprint(newBp);
-        const newActiveId = activeFrameworkId === id ? ((newBp.frameworks ?? [])[0]?.id ?? null) : activeFrameworkId;
+        const newActiveId = activeFrameworkId === id ? (newFrameworks[0]?.id ?? null) : activeFrameworkId;
         set({ blueprint: newBp, activeFrameworkId: newActiveId });
       },
 
       setCardAxisPosition: (axisId, cardId, value) => {
         const { blueprint } = get();
         if (!blueprint) return;
+        const eff = vRead();
         const clamped = Math.max(0, Math.min(9, Math.round(value)));
-        const newBp = updatedAt({
-          ...blueprint,
-          frameworkAxes: (blueprint.frameworkAxes ?? []).map((a) => {
+        const newBp = updatedAt(vWrite(blueprint, {
+          frameworkAxes: (eff.frameworkAxes ?? []).map((a) => {
             if (a.id !== axisId) return a;
             return { ...a, cardPositions: { ...a.cardPositions, [cardId]: clamped } };
           }),
-        });
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2750,14 +2842,14 @@ Return ONLY a JSON object in this exact format:
       removeCardFromAxis: (axisId, cardId) => {
         const { blueprint } = get();
         if (!blueprint) return;
-        const newBp = updatedAt({
-          ...blueprint,
-          frameworkAxes: (blueprint.frameworkAxes ?? []).map((a) => {
+        const eff = vRead();
+        const newBp = updatedAt(vWrite(blueprint, {
+          frameworkAxes: (eff.frameworkAxes ?? []).map((a) => {
             if (a.id !== axisId) return a;
             const { [cardId]: _, ...rest } = a.cardPositions;
             return { ...a, cardPositions: rest };
           }),
-        });
+        }));
         saveBlueprint(newBp);
         set({ blueprint: newBp });
       },
@@ -2788,7 +2880,7 @@ if (_shareToken) {
       _bootPromise = null; // Cancel any in-flight boot so the next login boots fresh
       useBlueprintStore.setState({ mode: 'auth', userId: null, userEmail: null,
         displayName: null, pendingNameCapture: false, blueprint: null,
-        rfNodes: [], rfEdges: [], effectiveActors: [], activeVersionId: null, storyboardMode: false, frameworkMode: false });
+        rfNodes: [], rfEdges: [], effectiveActors: [], effectivePhases: [], activeVersionId: null, storyboardMode: false, frameworkMode: false });
     }
   });
 

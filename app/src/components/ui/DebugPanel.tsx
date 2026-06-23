@@ -10,6 +10,7 @@ export function DebugPanel() {
   const [sectionsOpen, setSectionsOpen] = useState<Record<string, boolean>>({});
   const blueprint = useBlueprintStore((s) => s.blueprint);
   const effectiveActors = useBlueprintStore((s) => s.effectiveActors);
+  const effectivePhases = useBlueprintStore((s) => s.effectivePhases);
   function copyJson() {
     if (!blueprint) return;
     navigator.clipboard.writeText(JSON.stringify(blueprint, null, 2));
@@ -150,7 +151,7 @@ export function DebugPanel() {
           >
             {[
               { label: 'Actors', count: effectiveActors.length },
-              { label: 'Phases', count: blueprint.phases.length },
+              { label: 'Phases', count: effectivePhases.length },
               { label: 'Actions', count: blueprint.actions.length },
               { label: 'Pain pts', count: blueprint.painPoints.length },
             ].map(({ label, count }) => (
@@ -187,7 +188,7 @@ export function DebugPanel() {
               open={!!sectionsOpen['phases']}
               onToggle={() => toggleSection('phases')}
             >
-              {blueprint.phases.map((p) => (
+              {effectivePhases.map((p) => (
                 <DebugRow key={p.id} left={p.name} right={`order ${p.order}`} />
               ))}
             </DebugSection>
